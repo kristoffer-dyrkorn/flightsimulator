@@ -13,6 +13,10 @@ Runs smoothly at 60 fps on an average laptop.
 
 Warning: The code is not beautiful.
 
+## Screenshot
+
+![Screenshot](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/flight.jpg)
+
 ## Attributions
 
 - Flight model code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
