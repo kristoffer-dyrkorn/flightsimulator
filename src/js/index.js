@@ -9,6 +9,7 @@ import GraphicsConstants from "./graphics/graphicsconstants.js"
 import SimulationConstants from "./simulation/simulationconstants.js"
 import EngineAudio from "./audio/enginesound.js"
 import Gamepad from "./controller/gamepad.js"
+import Keyboard from "./controller/keyboard.js"
 
 let previousFrameTimestamp
 
@@ -27,8 +28,9 @@ const planePosition = new Vector(120300, 6959500, 1700)
 planePosition.sub(terrainCenter)
 
 let gamepad
+const keyboard = new Keyboard()
 
-const enginesound = new EngineAudio()
+const engineAudio = new EngineAudio()
 
 const camera = new Camera(45 * GraphicsConstants.DEGREES_TO_RADIANS)
 camera.setPosition(planePosition)
@@ -45,7 +47,7 @@ airplaneState.pow = 60 // % thrust
 
 const airplaneControlInput = new InputVector()
 airplaneControlInput.throttle = 0.6
-airplaneControlInput.elevator = -2
+airplaneControlInput.elevator = SimulationConstants.ELEVATOR_TRIM
 
 if (!gl) {
   console.error("Unable to get WebGL context.")
@@ -66,7 +68,7 @@ if (!gl) {
   gl.viewport(0, 0, window.innerWidth, window.innerHeight)
 
   window.addEventListener("resize", resizeHandler)
-  window.addEventListener("keydown", keyHandler)
+  window.addEventListener("keydown", keyboardHandler)
   window.addEventListener("gamepadconnected", event => {
     console.log("Gamepad %s connected", event.gamepad.id)
     gamepad = new Gamepad()
@@ -90,12 +92,14 @@ function drawScene(currentFrameTimestamp) {
     updateInputFromGamepad(airplaneControlInput, gamepad)
   }
 
-  let stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
+  airplaneControlInput.limitControls()
+
+  const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
 
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
 
-  let position = new Vector(
+  const position = new Vector(
     airplaneState.xe * SimulationConstants.FEET_TO_METERS,
     airplaneState.xn * SimulationConstants.FEET_TO_METERS,
     airplaneState.h * SimulationConstants.FEET_TO_METERS
@@ -111,71 +115,11 @@ function drawScene(currentFrameTimestamp) {
   camera.setOrientationFromEulerAngles(orientation)
 
   terrain.render(camera)
-
-  enginesound.setOutput(airplaneState.pow)
+  engineAudio.setOutput(airplaneState.pow)
 }
 
-function keyHandler(e) {
-  switch (e.key) {
-    case "l": // l for log
-      console.log(airplaneState.toString())
-      break
-    case "ArrowDown": // elevator up
-      airplaneControlInput.elevator -= 0.1
-      if (airplaneControlInput.elevator < SimulationConstants.ELEVATOR_MIN) {
-        airplaneControlInput.elevator = SimulationConstants.ELEVATOR_MIN
-      }
-      e.stopPropagation()
-      e.preventDefault()
-      break
-    case "ArrowUp": // elevator down
-      airplaneControlInput.elevator += 0.1
-      if (airplaneControlInput.elevator > SimulationConstants.ELEVATOR_MAX) {
-        airplaneControlInput.elevator = SimulationConstants.ELEVATOR_MAX
-      }
-      e.stopPropagation()
-      e.preventDefault()
-      break
-    case "ArrowLeft": // roll left
-      airplaneControlInput.aileron += 0.1
-      if (airplaneControlInput.aileron > SimulationConstants.AILERON_MAX) {
-        airplaneControlInput.aileron = SimulationConstants.AILERON_MAX
-      }
-      break
-    case "ArrowRight": // roll left
-      airplaneControlInput.aileron -= 0.1
-      if (airplaneControlInput.aileron < SimulationConstants.AILERON_MIN) {
-        airplaneControlInput.aileron = SimulationConstants.AILERON_MIN
-      }
-      break
-    case "q":
-      airplaneControlInput.throttle += 0.1
-      if (airplaneControlInput.throttle > SimulationConstants.POWER_MAX) {
-        airplaneControlInput.throttle = SimulationConstants.POWER_MAX
-      }
-      break
-    case "a":
-      airplaneControlInput.throttle -= 0.1
-      if (airplaneControlInput.throttle < SimulationConstants.POWER_MIN) {
-        airplaneControlInput.throttle = SimulationConstants.POWER_MIN
-      }
-      break
-    case "z": // rudder left
-      airplaneControlInput.rudder += 0.1
-      if (airplaneControlInput.rudder > SimulationConstants.RUDDER_MAX) {
-        airplaneControlInput.rudder = SimulationConstants.RUDDER_MAX
-      }
-      break
-    case "x": // rudder right
-      airplaneControlInput.rudder -= 0.1
-      if (airplaneControlInput.rudder < SimulationConstants.RUDDER_MIN) {
-        airplaneControlInput.rudder = SimulationConstants.RUDDER_MIN
-      }
-      break
-    case "v":
-      terrain.calculateVisiblity = !terrain.calculateVisiblity
-      break
-  }
+function keyboardHandler(keyboardEvent) {
+  keyboard.read(airplaneControlInput, keyboardEvent)
 }
 
 function resizeHandler() {
@@ -188,20 +132,19 @@ function resizeHandler() {
 function updateInputFromGamepad(airplaneControlInput, gamepad) {
   gamepad.read()
 
-  airplaneControlInput.aileron = (-gamepad.axes[2] / 10) * SimulationConstants.AILERON_MAX
-  airplaneControlInput.elevator = (gamepad.axes[3] / 10) * SimulationConstants.ELEVATOR_MAX - 2
+  // map joystick deflection to rudder deflection
+  const sensitivity = 0.1
+
+  airplaneControlInput.aileron = -gamepad.axes[2] * sensitivity * SimulationConstants.AILERON_MAX
+  airplaneControlInput.elevator = gamepad.axes[3] * sensitivity * SimulationConstants.ELEVATOR_MAX
+
+  airplaneControlInput.elevator -= SimulationConstants.ELEVATOR_TRIM
 
   if (gamepad.buttons[6].pressed) {
     airplaneControlInput.throttle -= 0.01
-    if (airplaneControlInput.throttle < SimulationConstants.POWER_MIN) {
-      airplaneControlInput.throttle = SimulationConstants.POWER_MIN
-    }
   }
 
   if (gamepad.buttons[7].pressed) {
     airplaneControlInput.throttle += 0.01
-    if (airplaneControlInput.throttle > SimulationConstants.POWER_MAX) {
-      airplaneControlInput.throttle = SimulationConstants.POWER_MAX
-    }
   }
 }

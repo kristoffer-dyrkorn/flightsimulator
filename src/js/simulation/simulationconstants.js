@@ -18,6 +18,8 @@ SimulationConstants.BETA_MAX = 30
 SimulationConstants.ELEVATOR_MIN = -25
 SimulationConstants.ELEVATOR_MAX = 25
 
+SimulationConstants.ELEVATOR_TRIM = -1.8
+
 SimulationConstants.RUDDER_MIN = -30
 SimulationConstants.RUDDER_MAX = 30
 
