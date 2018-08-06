@@ -40,7 +40,7 @@ Tested in Chrome, Firefox and Safari and on a Steelseries Nimbus gamepad.
 
 Terrain data is not included. To run the simulator you will need to download and setup your own terrain files. You will need at least height data, but matching ortophotos is needed for high realism.
 
-Please note: The code assumes that all coordinates are specified using UTM zone 32N, using meters as unit.
+Please note: The code assumes that all coordinates are specified using UTM zone 33N, using meters as unit.
 
 Height models (DEM files) for Norway can be downloaded from
 https://kartkatalog.geonorge.no/metadata/kartverket/dtm-50/e25d0104-0858-4d06-bba8-d154514c11d2

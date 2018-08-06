@@ -89,7 +89,7 @@ function drawScene(currentFrameTimestamp) {
   previousFrameTimestamp = currentFrameTimestamp
 
   if (gamepad) {
-    updateInputFromGamepad(airplaneControlInput, gamepad)
+    gamepad.read(airplaneControlInput)
   }
 
   airplaneControlInput.limitControls()
@@ -127,24 +127,4 @@ function resizeHandler() {
   canvas.height = window.innerHeight
   gl.viewport(0, 0, window.innerWidth, window.innerHeight)
   camera.setProjectionMatrix(window.innerWidth / window.innerHeight)
-}
-
-function updateInputFromGamepad(airplaneControlInput, gamepad) {
-  gamepad.read()
-
-  // map joystick deflection to rudder deflection
-  const sensitivity = 0.1
-
-  airplaneControlInput.aileron = -gamepad.axes[2] * sensitivity * SimulationConstants.AILERON_MAX
-  airplaneControlInput.elevator = gamepad.axes[3] * sensitivity * SimulationConstants.ELEVATOR_MAX
-
-  airplaneControlInput.elevator -= SimulationConstants.ELEVATOR_TRIM
-
-  if (gamepad.buttons[6].pressed) {
-    airplaneControlInput.throttle -= 0.01
-  }
-
-  if (gamepad.buttons[7].pressed) {
-    airplaneControlInput.throttle += 0.01
-  }
 }
