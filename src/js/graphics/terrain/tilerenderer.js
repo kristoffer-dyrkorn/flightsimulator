@@ -43,12 +43,12 @@ export default class TileRenderer {
   createVertices(tileVertices) {
     let i = 0
     let vertices = new Float32Array(3 * (tileVertices + 1) * (tileVertices + 1))
+
     for (let y = 0; y <= tileVertices; y++) {
       for (let x = 0; x <= tileVertices; x++) {
-        vertices[i] = x / tileVertices
-        vertices[i + 1] = y / tileVertices
-        vertices[i + 2] = 0
-        i = i + 3
+        vertices[i++] = x / tileVertices
+        vertices[i++] = y / tileVertices
+        i++
       }
     }
     return vertices
@@ -61,13 +61,12 @@ export default class TileRenderer {
     for (let y = 0; y < tileVertices; y++) {
       for (let x = 0; x < tileVertices; x++) {
         var pointer = y * (tileVertices + 1) + x
-        vertexIndices[i] = pointer
-        vertexIndices[i + 1] = pointer + 1
-        vertexIndices[i + 2] = pointer + tileVertices + 1
-        vertexIndices[i + 3] = pointer + 1
-        vertexIndices[i + 4] = pointer + tileVertices + 2
-        vertexIndices[i + 5] = pointer + tileVertices + 1
-        i = i + 6
+        vertexIndices[i++] = pointer
+        vertexIndices[i++] = pointer + 1
+        vertexIndices[i++] = pointer + tileVertices + 1
+        vertexIndices[i++] = pointer + 1
+        vertexIndices[i++] = pointer + tileVertices + 2
+        vertexIndices[i++] = pointer + tileVertices + 1
       }
     }
     return vertexIndices
