@@ -127,7 +127,7 @@ export default class TileRenderer {
   }
 
   compileShader(shaderScript, shaderType) {
-    let shader = gl.createShader(shaderType)
+    const shader = gl.createShader(shaderType)
     gl.shaderSource(shader, shaderScript)
     gl.compileShader(shader)
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
