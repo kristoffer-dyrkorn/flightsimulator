@@ -60,7 +60,7 @@ export default class TileRenderer {
 
     for (let y = 0; y < tileVertices; y++) {
       for (let x = 0; x < tileVertices; x++) {
-        var pointer = y * (tileVertices + 1) + x
+        const pointer = y * (tileVertices + 1) + x
         vertexIndices[i++] = pointer
         vertexIndices[i++] = pointer + 1
         vertexIndices[i++] = pointer + tileVertices + 1
