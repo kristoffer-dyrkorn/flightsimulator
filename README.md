@@ -19,13 +19,14 @@ Warning: The code is not beautiful.
 
 ## Attributions
 
+- Terrain data (as shown in the image above) is by the (Norwegian Mapping Authority)[https://www.kartverket.no] and is licensed under (CC BY 4.0)[https://creativecommons.org/licenses/by/4.0/]
 - Flight model code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
 - Node http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 
 ## License
 
-All code, except from the modules mentioned above, is licenced under Creative Commons Attribution-NonCommercial ShareAlike. See https://creativecommons.org/licenses/by-nc-sa/2.0/.
+All code and data, except what is mentioned above, is licensed under Creative Commons Attribution-NonCommercial ShareAlike. See https://creativecommons.org/licenses/by-nc-sa/2.0/.
 
 ## Running
 
