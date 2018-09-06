@@ -34,14 +34,15 @@ export default class Tile {
     const position = this.getPosition()
     position.add(this.terrainCenter)
     console.log("Fetching tile: " + position)
-    const filename = `/data/textures/${position[0]}-${position[1]}`
+    const topofilename = `/data/topography/${position[0]}-${position[1]}.png`
+    const texturefilename = `/data/satellite/${position[0]}-${position[1]}.jpg`
 
     // we cannot send a tile through a worker, so send the index to this tile.
     // when the textures have been loaded, we call the render method on the tile object
     // since the Terrain object is the only object that knows the mapping from
     // index to tile object, the worker must be located on that object
-    worker.postMessage({ filename: filename + ".png", size: GraphicsConstants.TOPO_SIZE, tileIndex: this.tileIndex })
-    worker.postMessage({ filename: filename + ".jpg", size: GraphicsConstants.PHOTO_SIZE, tileIndex: this.tileIndex })
+    worker.postMessage({ filename: topofilename, size: GraphicsConstants.TOPO_SIZE, tileIndex: this.tileIndex })
+    worker.postMessage({ filename: texturefilename, size: GraphicsConstants.PHOTO_SIZE, tileIndex: this.tileIndex })
   }
 
   initializeTexture(filename, image) {

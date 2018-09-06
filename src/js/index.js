@@ -24,7 +24,13 @@ terrainCenter.scale(0.5)
 let terrain = new Terrain(minExtents, maxExtents, terrainCenter)
 
 // set start point: UTM EAST, UTM NORTH, altitude (meters)
-const planePosition = new Vector(120300, 6959500, 1700)
+const url = new URL(document.location)
+const urlParams = url.searchParams
+const north = urlParams.get("n") || 6947000
+const east = urlParams.get("e") || 105000
+const alt = urlParams.get("a") || 3000
+
+const planePosition = new Vector(east, north, alt)
 planePosition.sub(terrainCenter)
 
 let gamepad
