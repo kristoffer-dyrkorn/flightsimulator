@@ -19,7 +19,8 @@ Warning: The code is not beautiful.
 
 ## Attributions
 
-- Terrain data and textures are provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Terrain data is provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Satellite photos are Copernicus Sentinel-2 data (2017), provided by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Flight model code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
 - Node http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
@@ -30,7 +31,7 @@ All code and data, except what is mentioned above, is licensed under Creative Co
 
 ## Running
 
-Go to `src/`, type `node server.js`, open a browser and go to `http://localhost:8000`.
+Open the file `src/index.html`.
 
 Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as the url parameters e (UTM east), n (UTM NORTH) and a (altitude). Example: `http://localhost:8000/?e=120300&n=6959500&a=2000`.
 

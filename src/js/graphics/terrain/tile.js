@@ -34,8 +34,11 @@ export default class Tile {
     const position = this.getPosition()
     position.add(this.terrainCenter)
     console.log("Fetching tile: " + position)
-    const topofilename = `/data/topography/${position[0]}-${position[1]}.png`
-    const texturefilename = `/data/satellite/${position[0]}-${position[1]}.jpg`
+
+    const server = "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
+
+    const topofilename = `${server}/topography/${position[0]}-${position[1]}.png`
+    const texturefilename = `${server}/satellite/${position[0]}-${position[1]}.jpg`
 
     // we cannot send a tile through a worker, so send the index to this tile.
     // when the textures have been loaded, we call the render method on the tile object
