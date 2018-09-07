@@ -33,7 +33,7 @@ All code and data, except what is mentioned above, is licensed under Creative Co
 
 Open the file `src/index.html`.
 
-Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as the url parameters e (UTM east), n (UTM NORTH) and a (altitude). Example: `http://localhost:8000/?e=120300&n=6959500&a=2000`.
+Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as the url parameters e (UTM east), n (UTM NORTH) and a (altitude). Example: `index.html?e=120300&n=6959500&a=2000`.
 
 ## Controls
 
