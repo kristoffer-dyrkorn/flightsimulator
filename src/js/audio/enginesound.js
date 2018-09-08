@@ -1,6 +1,7 @@
 export default class Enginesound {
   constructor() {
-    this.audioContext = new window.AudioContext()
+    const Context = window.AudioContext || webkitAudioContext
+    this.audioContext = new Context()
 
     // create a 1 channel buffer containing 5 seconds of audio
     this.noiseBuffer = this.audioContext.createBuffer(1, 5 * this.audioContext.sampleRate, this.audioContext.sampleRate)

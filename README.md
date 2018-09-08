@@ -31,7 +31,9 @@ All code and data, except what is mentioned above, is licensed under Creative Co
 
 ## Running
 
-Open the file `src/index.html`.
+To run using local terrain data, download and prepare the data sets by following the instructions in `sh`-files in the `scripts/` folder and then running the scripts.
+
+To run using already provided data sets, just open the file `src/index.html`.
 
 Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as the url parameters e (UTM east), n (UTM NORTH) and a (altitude). Example: `index.html?e=120300&n=6959500&a=2000`.
 
