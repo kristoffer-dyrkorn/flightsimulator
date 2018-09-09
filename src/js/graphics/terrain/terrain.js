@@ -31,6 +31,7 @@ export default class Terrain {
         image.onload = () => {
           this.tiles[tileIndex].initializeTexture(filename, image)
         }
+        image.crossOrigin = ""
         image.src = filename
       } else {
         this.tiles[tileIndex].initializeTexture(filename, bitmap)
