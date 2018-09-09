@@ -3,7 +3,7 @@ self.onmessage = e => {
 
   if (navigator.userAgent.includes("Safari") && !navigator.userAgent.includes("Chrome")) {
     // Safari lacks createImageBitmap. Fallback: decode image in main thread instead
-    self.postMessage([textureInfo.src, null, textureInfo.tileIndex])
+    self.postMessage([textureInfo.filename, null, textureInfo.tileIndex])
   } else {
     fetch(textureInfo.filename, { mode: "cors" })
       // TODO: Handle 404
