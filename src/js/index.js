@@ -98,7 +98,7 @@ function drawScene(currentFrameTimestamp) {
     gamepad.read(airplaneControlInput)
   }
 
-  airplaneControlInput.limitControls()
+  airplaneControlInput.normalizeControls()
 
   const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
