@@ -9,7 +9,7 @@ Runs smoothly at 60 fps on an average laptop.
 - Highly efficient loading of terrain and textures
 - Reasonably accurate flight model of an F-16
 - Synthesized, dynamic engine sound
-- Gamepad support
+- Gamepad support (limited to USB connected gamepads and Chrome)
 
 Warning: The code is not beautiful.
 
@@ -42,4 +42,5 @@ Starting point location (in UTM 33 N coordinates) and altitude (in metres) can b
 - Keyboard: Arrow keys for aileron and elevator. z and x for rudder. q and a for throttle.
 - Gamepad: Right joystick for aileron and elevator. Buttons 6 and 7 for throttle.
 
-Tested in Chrome, Firefox and Safari and on a Steelseries Nimbus gamepad.
+Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10.
+Gamepad controls are tested in Chrome on OS X using USB connected Steelseries Nimbus and Xbox One gamepads.
