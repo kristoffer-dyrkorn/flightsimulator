@@ -40,7 +40,7 @@ Starting point location (in UTM 33 N coordinates) and altitude (in metres) can b
 ## Controls
 
 - Keyboard: Arrow keys for aileron and elevator. z and x for rudder. q and a for throttle.
-- Gamepad: Right joystick for aileron and elevator. Buttons 6 and 7 for throttle.
+- Gamepad: Right joystick for aileron and elevator. Lower left and right front buttons for throttle.
 
 Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10.
 Gamepad controls are tested in Chrome on OS X using USB connected Steelseries Nimbus and Xbox One gamepads.
