@@ -125,6 +125,8 @@ function drawScene(currentFrameTimestamp) {
 }
 
 function keyboardHandler(keyboardEvent) {
+  // play audio on user (keyboard) interaction
+  engineAudio.resume()
   keyboard.read(airplaneControlInput, keyboardEvent)
 }
 

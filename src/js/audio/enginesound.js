@@ -43,6 +43,10 @@ export default class Enginesound {
     this.pitchSource.start()
   }
 
+  resume() {
+    this.audioContext.resume()
+  }
+
   setOutput(throttle) {
     // map throttle range 0 - 100 to frequency range 1000 - 6000 Hz
     const frequency = 1000 + throttle * 50
