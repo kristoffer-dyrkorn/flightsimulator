@@ -2,7 +2,7 @@ import SimulationConstants from "../simulation/simulationconstants.js"
 
 export default class Gamepad {
   constructor() {
-    this.isChrome68_0 = navigator.userAgent.includes("Chrome/68.0")
+    this.isBuggyChrome = navigator.userAgent.includes("Chrome/68.0") || navigator.userAgent.includes("Chrome/69.0")
     this.isChrome = navigator.userAgent.includes("Chrome/")
     this.isFirefox = navigator.userAgent.includes("Firefox/")
     this.gamepads = navigator.getGamepads()
@@ -36,8 +36,8 @@ export default class Gamepad {
       this.gamepads = navigator.getGamepads()
     }
 
-    if (this.isChrome68_0) {
-      // Chrome 68 bugs:
+    if (this.isBuggyChrome) {
+      // Chrome 68 and 69 bugs:
       // Axes must be read from Gamepad 0, indices 0, 1, 2, and 5 (!)
       // Buttons must be read from Gamepad 1
       this.axes = []
