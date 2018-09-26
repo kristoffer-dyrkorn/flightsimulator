@@ -22,7 +22,6 @@ Warning: The code is not beautiful.
 - Terrain data is provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Satellite photos are Copernicus Sentinel-2 data (2017), provided by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Flight model code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
-- Node http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 
 ## License
@@ -43,4 +42,4 @@ Starting point location (in UTM 33 N coordinates) and altitude (in metres) can b
 - Gamepad: Right joystick for aileron and elevator. Lower left and right front buttons for throttle.
 
 Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10.
-Gamepad controls are tested in Chrome on OS X using USB connected Steelseries Nimbus and Xbox One gamepads.
+Gamepad control is tested in Chrome on OS X, using both Steelseries Nimbus and Xbox One gamepads (both being connected by USB cable).
