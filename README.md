@@ -3,6 +3,8 @@
 An F-16 flight simulator with realistic graphics, flight dynamics and audio.
 Runs smoothly at 60 fps on an average laptop.
 
+[**Try it from your own browser!**](https://kristoffer-dyrkorn.github.io/flightsimulator/?n=6722000&e=-33000)
+
 ## Features
 
 - Tiled terrain rendering: The surface is divided into regions that are loaded and unloaded as needed
