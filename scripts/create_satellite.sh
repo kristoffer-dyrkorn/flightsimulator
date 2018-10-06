@@ -4,8 +4,8 @@
 #
 # https://kartkatalog.geonorge.no/metadata/uuid/42f35de3-c8eb-47be-972e-f0d5a80b6543
 #
-# Then, put them in a folder called sentinel/
-# Output is written to the folder satellite/ .
+# Then, put them in a folder called sentinel/ . Run the script.
+# Output is written to the folder satellite/ . Move the files to the folder (project root)src/data/satellite.
 
 # create virtual file representing the whole data set
 gdalbuildvrt satellite.vrt sentinel/*.tif
@@ -36,6 +36,8 @@ do
         ((top_left_y = y + tile_extents))
         ((bottom_right_x = x + tile_extents))
         gdal_translate $common_params -projwin $x $top_left_y $bottom_right_x $y satellite.vrt satellite/$x-$y.tif
+
+        # convert is part of ImageMagick
         convert -fill gray50 -colorize 15% -resize 1024x1024 -gamma 1.1,0.95,1.1 -quality 85% -channel B +level 15%,100%,1.05 satellite/$x-$y.tif satellite/$x-$y.jpg
         rm satellite/$x-$y.tif
 	done

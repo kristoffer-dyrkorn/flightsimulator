@@ -37,7 +37,7 @@ The app can be tried out [here](https://kristoffer-dyrkorn.github.io/flightsimul
 
 To run locally, using provided data sets, install Node (if not already installed), clone the project, go to `src` and run `node server.js`. The app is available at `localhost:8000`.
 
-To run locally, on local data sets, first download and prepare the data sets by following the instructions in `sh`-files in the `scripts/` folder and then running the scripts.
+To run locally, on local data sets, first download and prepare the data sets by following the instructions in `sh`-files in the `scripts/` folder and then running the scripts. Modify `const server = ...` in `fetchTextures(..)` in `src/js/graphics/terrain/tile.js` so tiles load from the local disk.
 
 Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as url parameters e (UTM east), n (UTM NORTH) and a (altitude). Example: `index.html?e=120300&n=6959500&a=2000`.
 

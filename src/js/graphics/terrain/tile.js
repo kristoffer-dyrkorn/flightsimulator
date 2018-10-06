@@ -37,6 +37,9 @@ export default class Tile {
 
     const server = "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
+    // when using local data, first make sure you have followed the instructions. then, replace with:
+    // const server = "/data"
+
     const topofilename = `${server}/topography/${position[0]}-${position[1]}.png`
     const texturefilename = `${server}/satellite/${position[0]}-${position[1]}.jpg`
 
