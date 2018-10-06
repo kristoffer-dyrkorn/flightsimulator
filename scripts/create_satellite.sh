@@ -4,7 +4,7 @@
 #
 # https://kartkatalog.geonorge.no/metadata/uuid/42f35de3-c8eb-47be-972e-f0d5a80b6543
 #
-# Then, put them in a folder called sentinel/ . Run the script.
+# Then, put them in a folder called sentinel/ . Run the script. NOTE: ImageMagick is required. Install if needed.
 # Output is written to the folder satellite/ . Move the files to the folder (project root)src/data/satellite.
 
 # create virtual file representing the whole data set

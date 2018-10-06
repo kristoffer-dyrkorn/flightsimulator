@@ -4,7 +4,7 @@
 #
 # https://kartkatalog.geonorge.no/metadata/kartverket/dtm-50/e25d0104-0858-4d06-bba8-d154514c11d2
 #
-# Then, put them in a folder called dem/ . Run the script.
+# Then, put them in a folder called dem/ . Run the script. NOTE: GDAL is required. Install if needed.
 # Output is written to the folder topography/ . Move the files to the folder (project root)src/data/topography.
 
 # create virtual file representing the whole data set
