@@ -1,7 +1,6 @@
 # A flight simulator in your browser
 
-An F-16 flight simulator with realistic graphics, flight dynamics and audio.
-Runs smoothly at 60 fps on an average laptop.
+An F-16 flight simulator with realistic graphics, flight dynamics and audio. Runs smoothly at 60 fps on an average laptop.
 
 ## Features
 
@@ -10,6 +9,7 @@ Runs smoothly at 60 fps on an average laptop.
 - Reasonably accurate flight model of an F-16
 - Synthesized, dynamic engine sound
 - Gamepad support (limited to USB connected gamepads and Chrome)
+- Works on iOS and Android (but no steering implemented so far)
 
 Warning: The code is not beautiful.
 
@@ -41,5 +41,4 @@ Starting point location (in UTM 33 N coordinates) and altitude (in metres) can b
 - Keyboard: Arrow keys for aileron and elevator. z and x for rudder. q and a for throttle.
 - Gamepad: Right joystick for aileron and elevator. Lower left and right front buttons for throttle.
 
-Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10.
-Gamepad control is tested in Chrome on OS X, using both Steelseries Nimbus and Xbox One gamepads (both being connected by USB cable).
+Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10. Gamepad control is tested in Chrome on OS X, on Steelseries Nimbus and Xbox One gamepads (each connected by USB cable). Rendering and audio works on iOS (tested in Safari on 11.4, iPhone 8) and Android (tested in Chrome on 8.1, Google Pixel). So far no support for steering is implemented on mobile platforms.
