@@ -38,7 +38,7 @@ do
         gdal_translate $common_params -projwin $x $top_left_y $bottom_right_x $y satellite.vrt satellite/$x-$y.tif
 
         # convert is part of ImageMagick
-        convert -fill gray50 -colorize 15% -resize 1024x1024 -gamma 1.1,0.95,1.1 -quality 85% -channel B +level 15%,100%,1.05 satellite/$x-$y.tif satellite/$x-$y.jpg
+        convert -fill gray50 -gamma 0.8 -colorize 25% -channel G -level 0%,100%,0.9 -channel B +level 5%,100%,1.1 -resize 1024x1024 -quality 85% satellite/$x-$y.tif satellite/$x-$y.jpg
         rm satellite/$x-$y.tif
 	done
 done
