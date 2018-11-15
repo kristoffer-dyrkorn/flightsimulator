@@ -43,12 +43,23 @@ export default class Tile {
     const topofilename = `${server}/topography/${position[0]}-${position[1]}.png`
     const texturefilename = `${server}/satellite/${position[0]}-${position[1]}.jpg`
 
-    // we cannot send a tile through a worker, so send the index to this tile.
-    // when the textures have been loaded, we call the render method on the tile object
-    // since the Terrain object is the only object that knows the mapping from
-    // index to tile object, the worker must be located on that object
-    worker.postMessage({ filename: topofilename, size: GraphicsConstants.TOPO_SIZE, tileIndex: this.tileIndex })
-    worker.postMessage({ filename: texturefilename, size: GraphicsConstants.PHOTO_SIZE, tileIndex: this.tileIndex })
+    this.loadTexture(texturefilename, GraphicsConstants.PHOTO_SIZE)
+    this.loadTexture(topofilename, GraphicsConstants.TOPO_SIZE)
+  }
+
+  loadTexture(filename, size) {
+    fetch(filename, { mode: "cors" })
+      .then(response => response.blob())
+      .then(blob => {
+        createImageBitmap(blob, 0, 0, size, size, { imageOrientation: "flipY" })
+          .then(bitmap => this.initializeTexture(filename, bitmap))
+          .catch(err => {
+            console.log("Error creating bitmap from: " + filename + ", " + err)
+          })
+      })
+      .catch(err => {
+        console.log("Error loading texture file: " + filename + ", " + err)
+      })
   }
 
   initializeTexture(filename, image) {

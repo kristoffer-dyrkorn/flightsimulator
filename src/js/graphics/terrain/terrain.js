@@ -18,25 +18,6 @@ export default class Terrain {
         this.tiles.push(tile)
       }
     }
-
-    // see Tile::fetchTextures(worker) for an explanation of why the worker
-    // is placed on the Terrain object
-    this.worker = new Worker("./js/graphics/terrain/texture.worker.js")
-    this.worker.onmessage = e => {
-      const [filename, bitmap, tileIndex] = e.data
-      if (!bitmap) {
-        // if no createImageBitmap was available (ie we run on Safari),
-        // decode image ourselves, on main thread
-        let image = new Image()
-        image.onload = () => {
-          this.tiles[tileIndex].initializeTexture(filename, image)
-        }
-        image.crossOrigin = ""
-        image.src = filename
-      } else {
-        this.tiles[tileIndex].initializeTexture(filename, bitmap)
-      }
-    }
   }
 
   render(camera) {
