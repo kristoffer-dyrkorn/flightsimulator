@@ -14,7 +14,7 @@ export default class Enginesound {
         let noise = Math.random() * 2 - 1
         buffer[i] = (lastOut + 0.02 * noise) / 1.02
         lastOut = buffer[i]
-        buffer[i] *= 5.5
+        buffer[i] *= 7.0
       }
     }
 
@@ -57,7 +57,7 @@ export default class Enginesound {
     const noiseVolume = volumeFactor * volumeFactor + 0.4
     this.noiseGain.gain.setValueAtTime(noiseVolume, this.audioContext.currentTime)
 
-    const pitchVolume = 0.1 - 0.05 * volumeFactor
+    const pitchVolume = 0.1 - 0.04 * volumeFactor
     this.pitchGain.gain.setValueAtTime(pitchVolume, this.audioContext.currentTime)
   }
 }
