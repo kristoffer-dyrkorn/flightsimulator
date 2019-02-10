@@ -31,6 +31,9 @@ export default class Keyboard {
       case "x": // rudder right
         airplaneControlInput.rudder -= 0.3
         break
+      case " ":
+        airplaneControlInput.internalView = !airplaneControlInput.internalView
+        break
     }
   }
 }

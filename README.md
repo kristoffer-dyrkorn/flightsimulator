@@ -10,6 +10,7 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 - Tiled terrain rendering: The surface is divided into regions that are loaded and unloaded as needed
 - Highly efficient loading of terrain and textures
 - Reasonably accurate flight model of an F-16
+- Internal and external views
 - Synthesized, dynamic engine sound
 - Gamepad support (limited to USB connected gamepads and Chrome)
 - Works on iOS and Android (but no steering implemented so far)
@@ -27,6 +28,7 @@ Warning: The code is not beautiful.
 - Flight dynamics code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 - Node.js http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
+- 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html
 
 ## License
 
@@ -44,7 +46,9 @@ Starting point location (in UTM 33 N coordinates) and altitude (in metres) can b
 
 ## Controls
 
-- Keyboard: Arrow keys for aileron and elevator. z and x for rudder. q and a for throttle.
-- Gamepad: Right joystick for aileron and elevator. Lower left and right front buttons for throttle.
+Use keyboard or gamepad.
+
+Arrow keys control aileron and elevator. z and x: rudder. q and a: throttle. Space toggles internal/external view.
+Right joystick controls aileron and elevator. Lower left and right front buttons: throttle.
 
 Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10. Gamepad control is tested in Chrome on OS X, on Steelseries Nimbus and Xbox One gamepads (each connected by USB cable). Rendering and audio works on iOS (tested in Safari on 12.1, iPhone 8) and Android (tested in Chrome on 8.1, Google Pixel). So far no support for steering is implemented on mobile platforms.

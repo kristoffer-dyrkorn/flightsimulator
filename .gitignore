@@ -1,3 +1,5 @@
 .DS_Store
-src/data/*
+src/data/satellite/*
+src/data/topography/*
+
 

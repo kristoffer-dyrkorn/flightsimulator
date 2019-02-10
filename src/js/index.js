@@ -2,6 +2,8 @@ import { gl } from "./graphics/gl.js"
 import Camera from "./graphics/camera.js"
 import Vector from "./graphics/vector.js"
 import Terrain from "./graphics/terrain/terrain.js"
+import OBJLoader from "./graphics/aircraft/objloader.js"
+import OBJRenderer from "./graphics/aircraft/objrenderer.js"
 import StateVector from "./simulation/statevector.js"
 import InputVector from "./simulation/inputvector.js"
 import F16Simulation from "./simulation/f16simulation.js"
@@ -32,6 +34,18 @@ const alt = urlParams.get("a") || 3000
 
 const planePosition = new Vector(east, north, alt)
 planePosition.sub(terrainCenter)
+
+let airplaneObject
+let objLoader = new OBJLoader("data/objects/")
+let objRenderer
+
+objLoader.load("f16.obj").then(obj => {
+  objRenderer = new OBJRenderer(obj)
+  obj.setPosition(planePosition)
+  airplaneObject = obj
+})
+
+const externalCameraOrientation = new Vector(0, 0, 0)
 
 let gamepad
 const keyboard = new Keyboard()
@@ -117,8 +131,22 @@ function drawScene(currentFrameTimestamp) {
     airplaneState.psi * GraphicsConstants.RADIANS_TO_DEGREES
   )
 
-  camera.setPosition(position)
-  camera.setOrientationFromEulerAngles(orientation)
+  if (airplaneControlInput.internalView) {
+    camera.setPosition(position)
+    camera.setOrientationFromEulerAngles(orientation)
+  } else {
+    camera.setOrientationFromEulerAngles(externalCameraOrientation)
+
+    airplaneObject.setPosition(position)
+    airplaneObject.setOrientationFromEulerAngles(orientation)
+
+    position[1] -= 30
+    camera.setPosition(position)
+
+    if (objRenderer) {
+      objRenderer.render(camera)
+    }
+  }
 
   terrain.render(camera)
   engineAudio.setOutput(airplaneState.pow)

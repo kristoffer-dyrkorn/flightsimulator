@@ -13,6 +13,7 @@ export default class InputVector {
     this.vxTurbulence = 0 // ft/sec
     this.vyTurbulence = 0 // ft/sec
     this.vzTurbulence = 0 // ft/sec
+    this.internalView = true
   }
 
   normalizeControls() {

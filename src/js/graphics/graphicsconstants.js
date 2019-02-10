@@ -3,11 +3,11 @@ export default class GraphicsConstants {}
 GraphicsConstants.DEGREES_TO_RADIANS = Math.PI / 180
 GraphicsConstants.RADIANS_TO_DEGREES = 180 / Math.PI
 
-GraphicsConstants.MIN_EAST = -100000
-GraphicsConstants.MIN_NORTH = 6400000
+GraphicsConstants.MIN_EAST = -87250
+GraphicsConstants.MIN_NORTH = 6438250
 
 GraphicsConstants.MAX_EAST = 1137000
-GraphicsConstants.MAX_NORTH = 8000000
+GraphicsConstants.MAX_NORTH = 7949000
 
 GraphicsConstants.TILE_EXTENTS = 12750
 GraphicsConstants.MAX_HEIGHT = 2469

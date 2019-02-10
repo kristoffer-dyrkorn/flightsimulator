@@ -81,7 +81,7 @@ export default class TileRenderer {
 
     // For textures to be correct in Chrome, we need
     // 1) the texture to by y-flipped here
-    // 2) the image to be y-fipped in the createImageBitmap method in the worker
+    // 2) the image to be y-fipped in the createImageBitmap method in the tile loader
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE)
@@ -152,7 +152,7 @@ export default class TileRenderer {
     void main(void) {
       textureCoordinates = vertexPosition.xy;
       vec4 texel = texture2D(topoTexture, textureCoordinates);
-      vec4 vertexPos = vec4(vertexPosition.xy * float(${this.tileExtents}) + tileOffset.xy, 2560.0 * texel.r, 1.0);
+      vec4 vertexPos = vec4(vertexPosition.xy * ${this.tileExtents}.0 + tileOffset.xy, 2550.0 * texel.r, 1.0);
       gl_Position = transformMatrix * vertexPos;
     }
     `
@@ -171,8 +171,7 @@ export default class TileRenderer {
     void main(void) {
       vec4 color = texture2D(photoTexture, textureCoordinates);
     
-      float distance = gl_FragCoord.z / gl_FragCoord.w;
-      float fogFactor = exp2( -0.00004 * 0.00004 * distance * distance);
+      float fogFactor = 1.0 - 0.00002 * gl_FragCoord.z / gl_FragCoord.w;
       fogFactor = clamp(fogFactor, 0.0, 1.0);
 
       gl_FragColor = mix(fogColor, color, fogFactor);

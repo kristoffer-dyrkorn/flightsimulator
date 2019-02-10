@@ -20,11 +20,10 @@ resolution=50
 ((tile_extents = ( tile_size - 1 ) * resolution))
 
 # set UTM coordinates of the tile set extents (whole of norway)
-tiles_min_x=-100000
-tiles_min_y=6400000
-
+tiles_min_x=-87250
+tiles_min_y=6438250
 tiles_max_x=1137000
-tiles_max_y=8000000
+tiles_max_y=7949000
 
 # quantize heights to 10 meter so values fit in a single byte
 # so we can use grayscale PNGs to store height maps
