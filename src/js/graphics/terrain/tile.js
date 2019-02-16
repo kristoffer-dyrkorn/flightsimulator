@@ -53,6 +53,7 @@ export default class Tile {
       bitmap.onload = () => {
         this.initializeTexture(filename, bitmap)
       }
+      bitmap.crossOrigin = "anonymous"
       bitmap.src = filename
     } else
       fetch(filename, { mode: "cors" })
