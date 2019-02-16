@@ -28,12 +28,12 @@ export default class OBJLoader {
     console.log("Loaded OBJ file.")
     console.log("Object name: " + this.obj.name)
 
-    // Move f-16 down and forward a bit so center of gravity is at y=0, z=0
+    // Move center of the model to the aircraft center of gravity
     // TODO: Fix this in a better way
     this.obj.meshes.forEach(mesh => {
       for (let i = 0; i < mesh.vertices.length / 3; i++) {
-        mesh.vertices[3 * i + 1] -= 1.5
-        mesh.vertices[3 * i + 2] += 1.5
+        mesh.vertices[3 * i + 1] -= 2.0
+        mesh.vertices[3 * i + 2] += 2.0
       }
     })
 
@@ -54,8 +54,8 @@ export default class OBJLoader {
     // sort the array according to the mesh material (ie texture)
     // so we support reuse of materials (ie WebGL state)
     // from one mesh to the next in the object
-    this.obj.meshes = [...this.obj.meshes.values()].sort(
-      (m1, m2) => (m1.material.name > m2.material.name ? 1 : m1.material.name < m2.material.name ? -1 : 0)
+    this.obj.meshes = [...this.obj.meshes.values()].sort((m1, m2) =>
+      m1.material.name > m2.material.name ? 1 : m1.material.name < m2.material.name ? -1 : 0
     )
 
     this.vertexData = null

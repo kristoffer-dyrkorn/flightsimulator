@@ -48,18 +48,25 @@ export default class Tile {
   }
 
   loadTexture(filename, size) {
-    fetch(filename, { mode: "cors" })
-      .then(response => response.blob())
-      .then(blob => {
-        createImageBitmap(blob, 0, 0, size, size, { imageOrientation: "flipY" })
-          .then(bitmap => this.initializeTexture(filename, bitmap))
-          .catch(err => {
-            console.log("Error creating bitmap from: " + filename + ", " + err)
-          })
-      })
-      .catch(err => {
-        console.log("Error loading texture file: " + filename + ", " + err)
-      })
+    if (!("createImageBitmap" in window)) {
+      const bitmap = new Image()
+      bitmap.onload = () => {
+        this.initializeTexture(filename, bitmap)
+      }
+      bitmap.src = filename
+    } else
+      fetch(filename, { mode: "cors" })
+        .then(response => response.blob())
+        .then(blob => {
+          createImageBitmap(blob, 0, 0, size, size, { imageOrientation: "flipY" })
+            .then(bitmap => this.initializeTexture(filename, bitmap))
+            .catch(err => {
+              console.log("Error creating bitmap from: " + filename + ", " + err)
+            })
+        })
+        .catch(err => {
+          console.log("Error loading texture file: " + filename + ", " + err)
+        })
   }
 
   initializeTexture(filename, image) {
