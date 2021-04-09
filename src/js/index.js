@@ -64,7 +64,7 @@ const camera = new THREE.PerspectiveCamera()
 camera.up.set(0, 0, 1)
 camera.fov = 45
 camera.near = 1
-camera.far = 40000
+camera.far = 60000
 cameras.push(camera)
 
 // secondary (external) cameras, derived from the main
