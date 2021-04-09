@@ -2,9 +2,13 @@
 
 An F-16 flight simulator with realistic graphics, flight dynamics and audio. Runs smoothly at 60 fps on an average laptop.
 
-## New version!
+## Screenshot
 
-April 9th 2021: A new version has been released::
+![Screenshot](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/flight.jpg)
+
+## April 9th 2021: New version!
+
+A new version has been released. Highlights:
 
 - Updated satellite photos, taken summer/fall 2019, giving better image quality and more realistic colors.
 - New external cameras: Press `space bar` to cycle between internal camera (cockpit), external "chase camera" and external "static camera".
@@ -26,10 +30,6 @@ April 9th 2021: A new version has been released::
 - Works on iOS and Android (but no steering implemented so far)
 
 Warning: The code is not beautiful.
-
-## Screenshot
-
-![Screenshot](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/flight.jpg)
 
 ## Attributions
 
