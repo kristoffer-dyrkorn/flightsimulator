@@ -2,17 +2,27 @@
 
 An F-16 flight simulator with realistic graphics, flight dynamics and audio. Runs smoothly at 60 fps on an average laptop.
 
+## New version!
+
+April 9th 2021: A new version has been released::
+
+- Updated satellite photos, taken summer/fall 2019, giving better image quality and more realistic colors.
+- New external cameras: Press `space bar` to cycle between internal camera (cockpit), external "chase camera" and external "static camera".
+- Geometry and textures have been omtimized. Mesh simplification reduces vertex counts, and compressed texture format reduces upload times and GPU memory.
+- Start coordinates can be given both as UTM 33N and lat/lon values. A starting direction can also be given. See below for examples.
+- Code has been rewritten to use `three.js`.
+
 [Try it out!](https://kristoffer-dyrkorn.github.io/flightsimulator/) Use arrow keys for control. (See below for more info.)
 
 ## Features
 
 - Realistic visualisation of all of mainland Norway
 - Tiled terrain rendering: The surface is divided into regions that are loaded and unloaded as needed
-- Highly efficient loading of terrain and textures
+- Highly efficient loading of terrain geometry and textures
 - Reasonably accurate flight model of an F-16
 - Internal and external views
 - Synthesized, dynamic engine sound
-- Gamepad support (limited to USB connected gamepads and Chrome)
+- Gamepad support (only tested on an USB gamepad and Chrome)
 - Works on iOS and Android (but no steering implemented so far)
 
 Warning: The code is not beautiful.
@@ -24,11 +34,12 @@ Warning: The code is not beautiful.
 ## Attributions
 
 - Terrain elevation data is provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
-- Satellite photos are Copernicus Sentinel-2 data (from july 2018), provided by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Satellite photos are Copernicus Sentinel-2 data (from july 2019), provided and processed by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Flight dynamics code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 - Node.js http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html
+- The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
 
 ## License
 
@@ -38,17 +49,20 @@ All code and data, except what is mentioned above, is licensed under Creative Co
 
 The app can be tried out [here](https://kristoffer-dyrkorn.github.io/flightsimulator/).
 
-To run locally, using provided data sets, install Node (if not already installed), clone the project, go to `src` and run `node server.js`. The app is available at `localhost:8000`.
+Startup parameters:
 
-To run locally, on local data sets, first download and prepare the data sets by following the instructions in `sh`-files in the `scripts/` folder and then running the scripts. Modify `const server = ...` in `fetchTextures(..)` in `src/js/graphics/terrain/tile.js` so tiles load from the local disk and not from the server.
+- Provide starting point coordinates (in UTM 33N or GPS coordinates) using url parameters `e` and `n`. Default start point is south of Molde.
+- Altitude (in metres) can be given using the parameter `a`. Default is 3000 metres.
+- Start direction (compass angle) can be provided by `c`. Default is 0 degrees, due north.
 
-Starting point location (in UTM 33 N coordinates) and altitude (in metres) can be provided as url parameters e (UTM east), n (UTM north) and a (altitude). Example: `index.html?e=120300&n=6959500&a=2000`.
+Example: https://kristoffer-dyrkorn.github.io/flightsimulator/?n=6981000&e=110000&a=1000&c=270
 
 ## Controls
 
 Use keyboard or gamepad.
 
-Arrow keys control aileron and elevator. z and x: rudder. q and a: throttle. Space toggles internal/external view.
-Right joystick controls aileron and elevator. Lower left and right front buttons: throttle.
+Arrow keys control aileron and elevator. z and `x`: rudder. `q` and `a`: throttle. Space cycles camera views. When using the external static camera, move the camera left and right using `j` and `l`, and up and down using `i` and `k`. Use `,` and `.` to move the camera nearer/further away.
 
-Rendering and keyboard control is tested in Firefox, Chrome and Safari on OS X, and in Edge on Windows 10. Gamepad control is tested in Chrome on OS X, on Steelseries Nimbus and Xbox One gamepads (each connected by USB cable). Rendering and audio works on iOS (tested in Safari on 12.1, iPhone 8) and Android (tested in Chrome on 8.1, Google Pixel). So far no support for steering is implemented on mobile platforms.
+Right joystick controls both aileron and elevator. Lower left and right front buttons regulate throttle.
+
+Rendering and keyboard control should work on all modern desktop browsers. Rendering should work on mobile browsers as well, but no aircraft control has yet been implemented.

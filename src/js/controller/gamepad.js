@@ -5,16 +5,16 @@ export default class Gamepad {
     this.gamepads = navigator.getGamepads()
     this.axes = []
     this.buttons = []
+
+    // map joystick deflection to rudder deflection
+    this.sensitivity = 0.1
   }
 
   read(airplaneControlInput) {
     this.getInput()
 
-    // map joystick deflection to rudder deflection
-    const sensitivity = 0.1
-
-    airplaneControlInput.aileron = -this.axes[2] * sensitivity * SimulationConstants.AILERON_MAX
-    airplaneControlInput.elevator = -this.axes[3] * sensitivity * SimulationConstants.ELEVATOR_MAX
+    airplaneControlInput.aileron = -this.axes[2] * this.sensitivity * SimulationConstants.AILERON_MAX
+    airplaneControlInput.elevator = -this.axes[3] * this.sensitivity * SimulationConstants.ELEVATOR_MAX
 
     airplaneControlInput.elevator += SimulationConstants.ELEVATOR_TRIM
 

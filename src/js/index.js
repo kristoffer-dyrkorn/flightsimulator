@@ -1,66 +1,151 @@
-import { gl } from "./graphics/gl.js"
-import Camera from "./graphics/camera.js"
-import Vector from "./graphics/vector.js"
-import Terrain from "./graphics/terrain/terrain.js"
-import OBJLoader from "./graphics/aircraft/objloader.js"
-import OBJRenderer from "./graphics/aircraft/objrenderer.js"
+import Tile from "./terrain/tile.js"
+import Terrain from "./terrain/terrain.js"
+import * as THREE from "./graphics/three.module.js"
+import { MTLLoader } from "./graphics/MTLLoader.js"
+import { OBJLoader } from "./graphics/OBJLoader.js"
 import StateVector from "./simulation/statevector.js"
 import InputVector from "./simulation/inputvector.js"
 import F16Simulation from "./simulation/f16simulation.js"
-import GraphicsConstants from "./graphics/graphicsconstants.js"
 import SimulationConstants from "./simulation/simulationconstants.js"
-import EngineAudio from "./audio/enginesound.js"
+import ObjectChaser from "./graphics/ObjectChaser.js"
 import Gamepad from "./controller/gamepad.js"
-import Keyboard from "./controller/keyboard.js"
+import EngineAudio from "./audio/enginesound.js"
 
-let previousFrameTimestamp
+// terrain boundaries, in UTM33 coordinates
+const MINX = -100000
+const MAXX = 461750
+const MINY = 6400000
+const MAXY = 7200000
 
-const canvas = document.getElementById("webgl")
+let frameTime = 0
+let previousFrameTime = 0
 
-const minExtents = new Vector(GraphicsConstants.MIN_EAST, GraphicsConstants.MIN_NORTH, 0)
-const maxExtents = new Vector(GraphicsConstants.MAX_EAST, GraphicsConstants.MAX_NORTH, 0)
-
-const terrainCenter = new Vector(minExtents)
-terrainCenter.add(maxExtents)
-terrainCenter.scale(0.5)
-let terrain = new Terrain(minExtents, maxExtents, terrainCenter)
-
-// set start point: UTM EAST, UTM NORTH, altitude (meters)
+// set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
 const url = new URL(document.location)
 const urlParams = url.searchParams
-const north = urlParams.get("n") || 6947000
-const east = urlParams.get("e") || 105000
+let east = urlParams.get("e") || 105000
+let north = urlParams.get("n") || 6958000
 const alt = urlParams.get("a") || 3000
+const startDirection = urlParams.get("c") || 0
 
-const planePosition = new Vector(east, north, alt)
-planePosition.sub(terrainCenter)
+// if input coordinates are GPS lat/lon, convert to utm33
+if (north < 72 && east < 33) {
+  const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
+  const utm = proj4(utm33NProjection, [Number(east), Number(north)])
+  east = utm[0]
+  north = utm[1]
+}
 
-let airplaneObject
-let objLoader = new OBJLoader("data/objects/")
-let objRenderer
+const startPoint = [east, north, alt]
 
-objLoader.load("f16.obj").then(obj => {
-  objRenderer = new OBJRenderer(obj)
-  obj.setPosition(planePosition)
-  airplaneObject = obj
+let updateResources = true
+let showWireFrame = false
+
+const canvas = document.getElementById("webgl")
+const scene = new THREE.Scene()
+// NOTE this makes all objects STATIC
+// i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
+scene.autoUpdate = false
+scene.background = new THREE.Color(0.78, 0.83, 0.93)
+scene.fog = new THREE.FogExp2(scene.background, 0.000025)
+
+const directionalLight = new THREE.DirectionalLight(0xcdb5ae, 0.5)
+directionalLight.position.set(0, -0.2, 0.8)
+directionalLight.updateMatrixWorld()
+scene.add(directionalLight)
+
+const ambientLight = new THREE.AmbientLight(0xc7d4ed, 0.05)
+scene.add(ambientLight)
+
+const cameras = []
+
+// main camera - internal view from cockpit
+const camera = new THREE.PerspectiveCamera()
+camera.up.set(0, 0, 1)
+camera.fov = 45
+camera.near = 1
+camera.far = 40000
+cameras.push(camera)
+
+// secondary (external) cameras, derived from the main
+cameras.push(camera.clone())
+cameras.push(camera.clone())
+
+// initial position of the static external camera,
+// relative to the aircraft
+const externalCameraPosition = {
+  distance: 50,
+  compass: 0,
+  inclination: 90,
+}
+
+let cameraIndex = 0
+
+const f16 = new THREE.Object3D()
+f16.visible = false
+scene.add(f16)
+
+const objectChaser = new ObjectChaser(f16)
+
+const manager = new THREE.LoadingManager()
+new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
+  materials.preload()
+
+  new OBJLoader(manager)
+    .setMaterials(materials)
+    .setPath("f16/")
+    .load(
+      "f16.obj",
+      (object) => {
+        // center the model at its center of gravity
+        object.position.set(0, 2, -2.5)
+
+        // align model with world axes
+        object.rotateX(90 * THREE.MathUtils.DEG2RAD)
+        object.rotateY(180 * THREE.MathUtils.DEG2RAD)
+        object.updateMatrixWorld()
+
+        f16.add(object)
+      },
+      (xhr) => {},
+      (error) => {
+        console.log("Could not load 3d model: " + error)
+      }
+    )
 })
 
-const externalCameraOrientation = new Vector(0, 0, 0)
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
+renderer.setPixelRatio(window.devicePixelRatio)
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.outputEncoding = THREE.sRGBEncoding
 
-let gamepad
-const keyboard = new Keyboard()
+let gamepad = null
+// const engineAudio = new EngineAudio()
 
-const engineAudio = new EngineAudio()
+window.addEventListener("resize", () => {
+  resetViewport()
+})
+window.addEventListener("keydown", keyboardHandler)
 
-const camera = new Camera(45 * GraphicsConstants.DEGREES_TO_RADIANS)
-camera.setPosition(planePosition)
+window.addEventListener("gamepadconnected", (event) => {
+  console.log("Gamepad %s connected", event.gamepad.id)
+  gamepad = new Gamepad()
+})
+window.addEventListener("gamepaddisconnected", (event) => {
+  console.log("Gamepad %s disconnected", event.gamepad.id)
+  gamepad = null
+})
+
+const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 
 const f16simulation = new F16Simulation()
 
 const airplaneState = new StateVector()
-airplaneState.xe = planePosition[0] * SimulationConstants.METERS_TO_FEET
-airplaneState.xn = planePosition[1] * SimulationConstants.METERS_TO_FEET
-airplaneState.h = planePosition[2] * SimulationConstants.METERS_TO_FEET
+airplaneState.xe = startPoint[0] * SimulationConstants.METERS_TO_FEET
+airplaneState.xn = startPoint[1] * SimulationConstants.METERS_TO_FEET
+airplaneState.h = startPoint[2] * SimulationConstants.METERS_TO_FEET
+
+airplaneState.psi = startDirection * THREE.MathUtils.DEG2RAD
 
 airplaneState.vt = 500 // feet/sec, ~ km/t
 airplaneState.pow = 60 // % thrust
@@ -69,44 +154,28 @@ const airplaneControlInput = new InputVector()
 airplaneControlInput.throttle = 0.6
 airplaneControlInput.elevator = SimulationConstants.ELEVATOR_TRIM
 
-if (!gl) {
-  console.error("Unable to get WebGL context.")
-} else {
-  const uintExtension = gl.getExtension("OES_element_index_uint")
-  if (!uintExtension) {
-    console.warn("OES_element_index_uint not supported.")
-  }
+resetViewport()
+drawScene()
 
-  const anisotropyExtension = gl.getExtension("EXT_texture_filter_anisotropic")
-  if (!anisotropyExtension) {
-    console.warn("EXT_texture_filter_anisotropic not supported.")
-  }
+// Log scene stats
+setInterval(() => {
+  //  console.log("Time offset: " + (new Date().getTime() - startTime))
+  console.log("Tiles loaded: " + Tile.loadCount)
+  console.log("Textures rendered: " + renderer.info.memory.textures)
+  console.log("Geometries rendered: " + renderer.info.memory.geometries)
+  console.log("Triangles rendered: " + renderer.info.render.triangles)
+}, 3000)
 
-  gl.clearColor(0.59, 0.75, 0.91, 1.0)
-  gl.enable(gl.DEPTH_TEST)
-  gl.depthFunc(gl.LEQUAL)
-  gl.viewport(0, 0, window.innerWidth, window.innerHeight)
+// register points every N ms
+setInterval(() => {
+  objectChaser.addPoint(f16)
+}, ObjectChaser.timeInterval)
 
-  window.addEventListener("resize", resizeHandler)
-  window.addEventListener("keydown", keyboardHandler)
-  window.addEventListener("gamepadconnected", event => {
-    console.log("Gamepad %s connected", event.gamepad.id)
-    gamepad = new Gamepad()
-  })
-  window.addEventListener("gamepaddisconnected", event => {
-    console.log("Gamepad %s disconnected", event.gamepad.id)
-    gamepad = null
-  })
-
-  resizeHandler()
-  drawScene()
-}
-
-function drawScene(currentFrameTimestamp) {
+function drawScene(currentFrametime) {
   requestAnimationFrame(drawScene)
 
-  let frameTime = currentFrameTimestamp - previousFrameTimestamp || 0
-  previousFrameTimestamp = currentFrameTimestamp
+  frameTime = currentFrametime - previousFrameTime || 0
+  previousFrameTime = currentFrametime
 
   if (gamepad) {
     gamepad.read(airplaneControlInput)
@@ -117,50 +186,112 @@ function drawScene(currentFrameTimestamp) {
   const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
 
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT)
+  f16.quaternion.identity()
+  f16.rotateZ(-airplaneState.psi)
+  f16.rotateY(airplaneState.phi)
+  f16.rotateX(airplaneState.theta)
 
-  const position = new Vector(
+  f16.position.set(
     airplaneState.xe * SimulationConstants.FEET_TO_METERS,
     airplaneState.xn * SimulationConstants.FEET_TO_METERS,
     airplaneState.h * SimulationConstants.FEET_TO_METERS
   )
+  f16.updateMatrixWorld()
 
-  const orientation = new Vector(
-    airplaneState.phi * GraphicsConstants.RADIANS_TO_DEGREES,
-    airplaneState.theta * GraphicsConstants.RADIANS_TO_DEGREES,
-    airplaneState.psi * GraphicsConstants.RADIANS_TO_DEGREES
-  )
+  // always update master camera
+  cameras[0].position.copy(f16.position)
+  cameras[0].quaternion.copy(f16.quaternion)
+  cameras[0].rotateX(90 * THREE.MathUtils.DEG2RAD)
+  cameras[0].updateMatrixWorld()
 
-  if (airplaneControlInput.internalView) {
-    camera.setPosition(position)
-    camera.setOrientationFromEulerAngles(orientation)
-  } else {
-    camera.setOrientationFromEulerAngles(externalCameraOrientation)
+  const cameraData = objectChaser.getPoint(frameTime)
 
-    airplaneObject.setPosition(position)
-    airplaneObject.setOrientationFromEulerAngles(orientation)
-
-    position[1] -= 30
-    camera.setPosition(position)
-
-    if (objRenderer) {
-      objRenderer.render(camera)
-    }
+  // update other cameras - derived from the master camera
+  switch (cameraIndex) {
+    case 1:
+      cameras[cameraIndex] = camera.clone()
+      cameras[cameraIndex].position.copy(cameraData.position)
+      cameras[cameraIndex].quaternion.copy(cameraData.quaternion)
+      cameras[cameraIndex].rotateX(90 * THREE.MathUtils.DEG2RAD)
+      cameras[cameraIndex].updateMatrixWorld()
+      break
+    case 2:
+      cameras[cameraIndex] = camera.clone()
+      cameras[cameraIndex].lookAt(f16.position)
+      cameras[cameraIndex].rotateZ(externalCameraPosition.compass * THREE.MathUtils.DEG2RAD) // compass
+      cameras[cameraIndex].rotateX(externalCameraPosition.inclination * THREE.MathUtils.DEG2RAD) // above / below horizon
+      cameras[cameraIndex].translateZ(externalCameraPosition.distance)
+      cameras[cameraIndex].updateMatrixWorld()
+      break
   }
 
-  terrain.render(camera)
-  engineAudio.setOutput(airplaneState.pow)
+  if (updateResources) terrain.update(camera, showWireFrame)
+  //  engineAudio.setOutput(airplaneState.pow)
+
+  renderer.render(scene, cameras[cameraIndex])
 }
 
 function keyboardHandler(keyboardEvent) {
-  // play audio on user (keyboard) interaction
-  engineAudio.resume()
-  keyboard.read(airplaneControlInput, keyboardEvent)
+  //  engineAudio.resume()
+
+  switch (keyboardEvent.key) {
+    case "ArrowDown": // elevator up
+      airplaneControlInput.elevator -= 0.3
+      keyboardEvent.stopPropagation()
+      keyboardEvent.preventDefault()
+      break
+    case "ArrowUp": // elevator down
+      airplaneControlInput.elevator += 0.3
+      keyboardEvent.stopPropagation()
+      keyboardEvent.preventDefault()
+      break
+    case "ArrowLeft": // roll left
+      airplaneControlInput.aileron += 0.3
+      break
+    case "ArrowRight": // roll right
+      airplaneControlInput.aileron -= 0.3
+      break
+    case "q":
+      airplaneControlInput.throttle += 0.1
+      break
+    case "a":
+      airplaneControlInput.throttle -= 0.1
+      break
+    case "z": // rudder left
+      airplaneControlInput.rudder += 0.3
+      break
+    case "j": // external cam left
+      externalCameraPosition.compass -= 3
+      break
+    case "l": // external cam right
+      externalCameraPosition.compass += 3
+      break
+    case "i": // external cam up
+      externalCameraPosition.inclination -= 2
+      break
+    case "k": // external cam down
+      externalCameraPosition.inclination += 2
+      break
+    case ",": // external cam nearer
+      externalCameraPosition.distance -= 10
+      break
+    case ".": // external cam farer
+      externalCameraPosition.distance += 10
+      break
+    case " ":
+      cameraIndex++
+      cameraIndex %= cameras.length
+      if (cameraIndex === 0) f16.visible = false
+      if (cameraIndex === 1) f16.visible = true
+      if (cameraIndex === 2) f16.visible = true
+      break
+    case "w":
+      showWireFrame = !showWireFrame
+  }
 }
 
-function resizeHandler() {
-  canvas.width = window.innerWidth
-  canvas.height = window.innerHeight
-  gl.viewport(0, 0, window.innerWidth, window.innerHeight)
-  camera.setProjectionMatrix(window.innerWidth / window.innerHeight)
+function resetViewport() {
+  camera.aspect = window.innerWidth / window.innerHeight
+  camera.updateProjectionMatrix()
+  renderer.setSize(window.innerWidth, window.innerHeight)
 }

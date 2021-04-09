@@ -12,7 +12,7 @@ newmtl Body
 	Kd 1.0000 1.0000 1.0000
 	Ks 0.7529 0.7529 0.7529
 	Ke 0.0000 0.0000 0.0000
-	map_Kd Body-d.jpg
+	map_Kd Body-d.png
 
 newmtl Glass
 	Ns 8.0000
@@ -26,6 +26,7 @@ newmtl Glass
 	Ks 0.7529 0.7529 0.7529
 	Ke 0.0000 0.0000 0.0000
 	map_Kd Glass.jpg
+	map_d Glass.png
 
 newmtl Seat
 	Ns 8.0000
@@ -38,7 +39,7 @@ newmtl Seat
 	Kd 1.0000 1.0000 1.0000
 	Ks 0.0000 0.0000 0.0000
 	Ke 0.0000 0.0000 0.0000
-	map_Kd Seat.jpg
+	map_Kd Seat.png
 
 newmtl Pilot
 	Ns 8.0000
@@ -51,4 +52,4 @@ newmtl Pilot
 	Kd 1.0000 1.0000 1.0000
 	Ks 0.0000 0.0000 0.0000
 	Ke 0.0000 0.0000 0.0000
-	map_Kd Pilot.jpg
+	map_Kd Pilot.png
