@@ -13,9 +13,9 @@ import EngineAudio from "./audio/enginesound.js"
 
 // terrain boundaries, in UTM33 coordinates
 const MINX = -100000
-const MAXX = 461750
+const MAXX = 1137000
 const MINY = 6400000
-const MAXY = 7200000
+const MAXY = 7970000
 
 let frameTime = 0
 let previousFrameTime = 0
@@ -76,6 +76,7 @@ cameras.push(camera.clone())
 const externalCameraPosition = {
   distance: 50,
   compass: 0,
+  compassSpeed: 0,
   inclination: 90,
 }
 
@@ -122,6 +123,9 @@ renderer.outputEncoding = THREE.sRGBEncoding
 let gamepad = null
 // const engineAudio = new EngineAudio()
 
+const startButton = document.getElementById("start")
+startButton.addEventListener("click", start)
+
 window.addEventListener("resize", () => {
   resetViewport()
 })
@@ -154,9 +158,6 @@ const airplaneControlInput = new InputVector()
 airplaneControlInput.throttle = 0.6
 airplaneControlInput.elevator = SimulationConstants.ELEVATOR_TRIM
 
-resetViewport()
-drawScene()
-
 // Log scene stats
 setInterval(() => {
   //  console.log("Time offset: " + (new Date().getTime() - startTime))
@@ -170,6 +171,45 @@ setInterval(() => {
 setInterval(() => {
   objectChaser.addPoint(f16)
 }, ObjectChaser.timeInterval)
+
+function start() {
+  // remove start button
+  document.getElementById("buttoncontainer").style.display = "none"
+
+  let isMobile = false
+  if ("maxTouchPoints" in navigator) {
+    isMobile = navigator.maxTouchPoints > 0
+  }
+
+  if (isMobile) {
+    // reduce triangle counts
+    camera.far = 40000
+    scene.fog = new THREE.FogExp2(scene.background, 0.00004)
+
+    if (
+      window.DeviceOrientationEvent !== undefined &&
+      typeof window.DeviceOrientationEvent.requestPermission === "function"
+    ) {
+      window.DeviceOrientationEvent.requestPermission()
+        .then((response) => {
+          if (response == "granted") {
+            window.addEventListener("deviceorientation", (event) => readDeviceOrientation(event))
+          }
+        })
+        .catch((error) => {
+          console.error("Unable to use DeviceOrientation API:", error)
+        })
+    } else {
+      window.addEventListener("deviceorientation", (event) => readDeviceOrientation(event))
+    }
+
+    // tap screen = cycle cameras
+    window.addEventListener("touchstart", () => nextCamera())
+  }
+
+  resetViewport()
+  drawScene()
+}
 
 function drawScene(currentFrametime) {
   requestAnimationFrame(drawScene)
@@ -222,6 +262,8 @@ function drawScene(currentFrametime) {
       cameras[cameraIndex].rotateX(externalCameraPosition.inclination * THREE.MathUtils.DEG2RAD) // above / below horizon
       cameras[cameraIndex].translateZ(externalCameraPosition.distance)
       cameras[cameraIndex].updateMatrixWorld()
+
+      externalCameraPosition.compass += externalCameraPosition.compassSpeed
       break
   }
 
@@ -229,6 +271,19 @@ function drawScene(currentFrametime) {
   //  engineAudio.setOutput(airplaneState.pow)
 
   renderer.render(scene, cameras[cameraIndex])
+}
+
+function readDeviceOrientation(event) {
+  airplaneControlInput.aileron = event.beta * 0.1
+  airplaneControlInput.elevator = (-event.gamma + 60) * 0.1
+}
+
+function nextCamera() {
+  cameraIndex++
+  cameraIndex %= cameras.length
+  if (cameraIndex === 0) f16.visible = false
+  if (cameraIndex === 1) f16.visible = true
+  if (cameraIndex === 2) f16.visible = true
 }
 
 function keyboardHandler(keyboardEvent) {
@@ -261,10 +316,10 @@ function keyboardHandler(keyboardEvent) {
       airplaneControlInput.rudder += 0.3
       break
     case "j": // external cam left
-      externalCameraPosition.compass -= 3
+      externalCameraPosition.compassSpeed -= 0.15
       break
     case "l": // external cam right
-      externalCameraPosition.compass += 3
+      externalCameraPosition.compassSpeed += 0.15
       break
     case "i": // external cam up
       externalCameraPosition.inclination -= 2
@@ -279,11 +334,7 @@ function keyboardHandler(keyboardEvent) {
       externalCameraPosition.distance += 10
       break
     case " ":
-      cameraIndex++
-      cameraIndex %= cameras.length
-      if (cameraIndex === 0) f16.visible = false
-      if (cameraIndex === 1) f16.visible = true
-      if (cameraIndex === 2) f16.visible = true
+      nextCamera()
       break
     case "w":
       showWireFrame = !showWireFrame
