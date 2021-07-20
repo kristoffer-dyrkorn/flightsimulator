@@ -123,9 +123,14 @@ renderer.outputEncoding = THREE.sRGBEncoding
 let gamepad = null
 
 const audioContext = new window.AudioContext()
+let engineSound
 
-await audioContext.audioWorklet.addModule("js/audio/brown-noise-processor.js")
-const engineSound = new EngineSound(audioContext)
+// UGLY HACK: should have used top-level await, but not all browsers support it,
+// so assume the promise resolves (ie the engineSound object is instantiated) before
+// the user presses start.
+audioContext.audioWorklet.addModule("js/audio/brown-noise-processor.js").then(() => {
+  engineSound = new EngineSound()
+})
 
 const startButton = document.getElementById("start")
 startButton.addEventListener("click", start)
@@ -178,6 +183,7 @@ setInterval(() => {
 
 function start() {
   audioContext.resume()
+  engineSound.start(audioContext)
 
   // remove start button
   document.getElementById("buttoncontainer").remove()

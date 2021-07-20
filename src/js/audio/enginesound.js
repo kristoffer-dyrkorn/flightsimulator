@@ -1,5 +1,5 @@
 export default class EngineSound {
-  constructor(audioContext) {
+  start(audioContext) {
     this.audioContext = audioContext
 
     this.noiseSource = new AudioWorkletNode(this.audioContext, "brown-noise-processor")

@@ -17,16 +17,17 @@ export default class InputVector {
   }
 
   normalizeControls() {
+    // clamp throttle and control surface deflections to aircraft limits
     this.throttle = this.limiter(this.throttle, SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
     this.elevator = this.limiter(this.elevator, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
     this.aileron = this.limiter(this.aileron, SimulationConstants.AILERON_MIN, SimulationConstants.AILERON_MAX)
     this.rudder = this.limiter(this.rudder, SimulationConstants.RUDDER_MIN, SimulationConstants.RUDDER_MAX)
 
-    // auto-center rudders. note: only applies to keyboard control
-    // since control inputs from gamepads are read every frame
-
-    // center around the elevator trim value
+    // center elevator around the trim value
     this.elevator = (this.elevator - SimulationConstants.ELEVATOR_TRIM) * 0.98 + SimulationConstants.ELEVATOR_TRIM
+
+    // auto-center rudders. in practice, this only applies to keyboard control
+    // since control inputs from gamepads are re-read every frame
     this.aileron = this.aileron * 0.98
     this.rudder = this.rudder * 0.98
   }
