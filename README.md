@@ -2,6 +2,8 @@
 
 An F-16 flight simulator with realistic graphics, flight dynamics and audio. Runs smoothly at 60 fps on an average laptop.
 
+[Try it out!](https://kristoffer-dyrkorn.github.io/flightsimulator/) Use arrow keys for control. (See below for more info.)
+
 ![Screenshot](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/flight.jpg)
 
 ## July 20th 2021: New version!
@@ -21,8 +23,6 @@ A new version has been released. Highlights:
 - Geometry and textures have been omtimized. Mesh simplification reduces vertex counts, and compressed texture format reduces upload times and GPU memory.
 - Start coordinates can be given both as UTM 33N and lat/lon values. A starting direction can also be given. See below for examples.
 - Code has been rewritten to use `three.js`.
-
-[Try it out!](https://kristoffer-dyrkorn.github.io/flightsimulator/) Use arrow keys for control. (See below for more info.)
 
 ## Features
 
