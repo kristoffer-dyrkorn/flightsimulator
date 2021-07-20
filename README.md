@@ -10,7 +10,7 @@ Highlights:
 
 - Audio problems are fixed, now using audio worklets.
 - Update `three.js`.
-- Known bug: On mobile devices, numerical integration is somehow unstable, this ruins the physics simulation.
+- Known bug: On mobile devices, numerical integration is somehow unstable. This ruins the physics simulation.
 
 ## April 9th 2021: New version!
 
