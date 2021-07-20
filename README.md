@@ -4,6 +4,14 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 
 ![Screenshot](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/flight.jpg)
 
+## July 20th 2021: New version!
+
+Highlights:
+
+- Audio problems are fixed, now using audio worklets.
+- Update `three.js`.
+- Known bug: On mobile devices, numerical integration is somehow unstable, this ruins the physics simulation.
+
 ## April 9th 2021: New version!
 
 A new version has been released. Highlights:
