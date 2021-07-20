@@ -9,7 +9,7 @@ import F16Simulation from "./simulation/f16simulation.js"
 import SimulationConstants from "./simulation/simulationconstants.js"
 import ObjectChaser from "./graphics/ObjectChaser.js"
 import Gamepad from "./controller/gamepad.js"
-import EngineAudio from "./audio/enginesound.js"
+import EngineSound from "./audio/enginesound.js"
 
 // terrain boundaries, in UTM33 coordinates
 const MINX = -100000
@@ -121,7 +121,11 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.outputEncoding = THREE.sRGBEncoding
 
 let gamepad = null
-// const engineAudio = new EngineAudio()
+
+const audioContext = new window.AudioContext()
+
+await audioContext.audioWorklet.addModule("js/audio/brown-noise-processor.js")
+const engineSound = new EngineSound(audioContext)
 
 const startButton = document.getElementById("start")
 startButton.addEventListener("click", start)
@@ -173,8 +177,10 @@ setInterval(() => {
 }, ObjectChaser.timeInterval)
 
 function start() {
+  audioContext.resume()
+
   // remove start button
-  document.getElementById("buttoncontainer").style.display = "none"
+  document.getElementById("buttoncontainer").remove()
 
   let isMobile = false
   if ("maxTouchPoints" in navigator) {
@@ -186,6 +192,7 @@ function start() {
     camera.far = 40000
     scene.fog = new THREE.FogExp2(scene.background, 0.00004)
 
+    // device tilt = aircraft control
     if (
       window.DeviceOrientationEvent !== undefined &&
       typeof window.DeviceOrientationEvent.requestPermission === "function"
@@ -246,7 +253,7 @@ function drawScene(currentFrametime) {
 
   const cameraData = objectChaser.getPoint(frameTime)
 
-  // update other cameras - derived from the master camera
+  // update current camera - derived from the master camera
   switch (cameraIndex) {
     case 1:
       cameras[cameraIndex] = camera.clone()
@@ -268,14 +275,14 @@ function drawScene(currentFrametime) {
   }
 
   if (updateResources) terrain.update(camera, showWireFrame)
-  //  engineAudio.setOutput(airplaneState.pow)
+  engineSound.setOutput(airplaneState.pow)
 
   renderer.render(scene, cameras[cameraIndex])
 }
 
 function readDeviceOrientation(event) {
-  airplaneControlInput.aileron = event.beta * 0.1
-  airplaneControlInput.elevator = (-event.gamma + 60) * 0.1
+  airplaneControlInput.aileron = event.beta * 0.15
+  airplaneControlInput.elevator = (-event.gamma + 30) * 0.15
 }
 
 function nextCamera() {
@@ -287,8 +294,6 @@ function nextCamera() {
 }
 
 function keyboardHandler(keyboardEvent) {
-  //  engineAudio.resume()
-
   switch (keyboardEvent.key) {
     case "ArrowDown": // elevator up
       airplaneControlInput.elevator -= 0.3
