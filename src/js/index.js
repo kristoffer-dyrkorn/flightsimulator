@@ -183,7 +183,8 @@ async function start() {
   engineSound.start(audioContext)
 
   // remove start button
-  document.getElementById("buttoncontainer").remove()
+  document.getElementById("buttoncontainer").style.display = "none"
+  canvas.style.display = "block"
 
   let isMobile = false
   if ("maxTouchPoints" in navigator) {
