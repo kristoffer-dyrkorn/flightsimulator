@@ -150,6 +150,7 @@ window.addEventListener("gamepaddisconnected", (event) => {
 })
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
+terrain.initialize(camera, startPoint, startDirection)
 
 const f16simulation = new F16Simulation()
 

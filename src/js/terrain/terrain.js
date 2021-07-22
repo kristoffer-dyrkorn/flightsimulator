@@ -38,4 +38,26 @@ export default class Terrain {
       tile.update(camera, showWireFrame)
     })
   }
+
+  initialize(camera, startPoint, startDirection) {
+    // find a target point in front of the camera, 30% of the distance to far clip plane
+    // the target point is meant to be somewhere near focus of attention for the user
+    const targetPosition = new THREE.Vector3()
+    targetPosition.x = startPoint[0] + camera.far * 0.3 * Math.cos((90 - startDirection) * THREE.MathUtils.DEG2RAD)
+    targetPosition.y = startPoint[1] + camera.far * 0.3 * Math.sin((90 - startDirection) * THREE.MathUtils.DEG2RAD)
+
+    // stort tiles according to distance to the start point, ie according to focus of attention
+    // this makes the most prominent tiles load first so that loading appears to go much faster.
+    // this is only important for first, initial loading.
+    // later, incremental loading/unloading is not affected by the sequence of tiles in the array
+    this.tiles.sort((tileA, tileB) => {
+      if (
+        tileA.boundingSphere.center.distanceTo(targetPosition) < tileB.boundingSphere.center.distanceTo(targetPosition)
+      ) {
+        return -1
+      } else {
+        return 1
+      }
+    })
+  }
 }
