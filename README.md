@@ -11,6 +11,7 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 Highlights:
 
 - Audio problems are fixed, now using audio worklets.
+- Most prominent tiles are loaded first, reducing apparent loading times.
 - Update `three.js`.
 - Known bug: On mobile devices, numerical integration is somehow unstable. This ruins the physics simulation.
 
