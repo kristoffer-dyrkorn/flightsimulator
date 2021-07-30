@@ -18,3 +18,13 @@ To generate texture files, run `generate_textures.sh`. Needed input parameters a
 Input file, output directory, tile size (meters), texture size (pixels) and geographic extents.
 
 Note: Data generation for all of Norway will take several hours.
+
+## Credits
+
+- Textures are stored in Basis format, using https://github.com/BinomialLLC/basis_universal
+- Mesh simplification is done using a patched version of https://github.com/sp4cerat/Fast-Quadric-Mesh-Simplification
+- Vertex reordering is based on Martin Storsjo's implementation of the Forsyth algorithm, see https://www.martin.st/thesis/
+
+## License
+
+All code and data, except what is mentioned above, is licensed under Creative Commons Attribution-NonCommercial ShareAlike. See https://creativecommons.org/licenses/by-nc-sa/4.0/.
