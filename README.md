@@ -12,8 +12,7 @@ Highlights:
 
 - Audio problems are fixed, now using audio worklets.
 - Most prominent tiles are loaded first, reducing apparent loading times.
-- Update `three.js`.
-- Known bug: On mobile devices, numerical integration is somehow unstable. This ruins the physics simulation.
+- Updated `three.js`.
 
 ## April 9th 2021: New version!
 
@@ -72,4 +71,4 @@ Arrow keys control aileron and elevator. z and `x`: rudder. `q` and `a`: throttl
 
 Right joystick controls both aileron and elevator. Lower left and right front buttons regulate throttle.
 
-Rendering and keyboard control should work on all modern desktop browsers. Rendering should work on mobile browsers as well, but no aircraft control has yet been implemented.
+Rendering and keyboard control should work on all modern desktop browsers. Rendering should work on mobile browsers as well, but aircraft control has not yet been implemented.
