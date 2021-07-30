@@ -1,6 +1,6 @@
 ## Scripts to generate meshes and textures
 
-These scripts read DEMs and satelitte photos from Kartverket and convert the data to the formats used in the simulator.
+These scripts read DEMs and satelitte photos from the Norwegian Mapping Authority and convert the data to the formats used in the simulator.
 
 Sources:
 
@@ -9,7 +9,7 @@ Sources:
 
 ## How to run
 
-Use GDAL to create a VRT file containing all the files for a given data source (DEM files or satelitte files).
+Use GDAL to create a VRT file containing all the files for a given data source (DEM files or satellite files).
 
 To generate meshes, run `generate_meshes.sh`. Needed input parameteres are:
 Input file, output directory, tile size (meters), tile resolution (meters) and geographic extents.

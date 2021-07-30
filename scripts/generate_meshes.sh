@@ -25,6 +25,10 @@ tiles_max_y=$8
 
 tmpdir="tmpdir-meshes"
 
+# create directories if needed
+mkdir -p $tmpdir
+mkdir -p $outputdir
+
 # empty the working directory
 rm -f $tmpdir/*
 

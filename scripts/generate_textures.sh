@@ -23,6 +23,10 @@ echo "scale=3;$tile_extents / $texture_size" | bc -l
 
 tmpdir="tmpdir-textures"
 
+# create directories if needed
+mkdir -p $tmpdir
+mkdir -p $outputdir
+
 # empty the working directory
 rm -f $tmpdir/*
 
