@@ -6,8 +6,7 @@ import { OBJLoader } from "./graphics/OBJLoader.js"
 import StateVector from "./simulation/statevector.js"
 import InputVector from "./simulation/inputvector.js"
 import F16Simulation from "./simulation/f16simulation.js"
-import SimulationConstants from "./simulation/simulationconstants.js"
-import ObjectChaser from "./graphics/ObjectChaser.js"
+import ChaseObject from "./graphics/ChaseObject.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 
@@ -17,31 +16,20 @@ const MAXX = 1137000
 const MINY = 6400000
 const MAXY = 7970000
 
-let frameTime = 0
+let showWireFrame = false
 let previousFrameTime = 0
 
-// set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
-const url = new URL(document.location)
-const urlParams = url.searchParams
-let east = urlParams.get("e") || 105000
-let north = urlParams.get("n") || 6958000
-const alt = urlParams.get("a") || 3000
-const startDirection = urlParams.get("c") || 0
+let currentCamera = 0
 
-// if input coordinates are GPS lat/lon, convert to utm33
-if (north < 72 && east < 33) {
-  const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
-  const utm = proj4(utm33NProjection, [Number(east), Number(north)])
-  east = utm[0]
-  north = utm[1]
-}
-
-const startPoint = [east, north, alt]
-
-let updateResources = true
-let showWireFrame = false
+let gamepad = null
+let engineSound = null
 
 const canvas = document.getElementById("webgl")
+const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
+renderer.setPixelRatio(window.devicePixelRatio)
+renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.outputEncoding = THREE.sRGBEncoding
+
 const scene = new THREE.Scene()
 // NOTE this makes all objects STATIC
 // i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
@@ -49,6 +37,7 @@ scene.autoUpdate = false
 scene.background = new THREE.Color(0.78, 0.83, 0.93)
 scene.fog = new THREE.FogExp2(scene.background, 0.000025)
 
+// add lights to the scene, to propely display the f16 model
 const directionalLight = new THREE.DirectionalLight(0xcdb5ae, 0.5)
 directionalLight.position.set(0, -0.2, 0.8)
 directionalLight.updateMatrixWorld()
@@ -57,6 +46,7 @@ scene.add(directionalLight)
 const ambientLight = new THREE.AmbientLight(0xc7d4ed, 0.05)
 scene.add(ambientLight)
 
+// initialize cameras
 const cameras = []
 
 // main camera - internal view from cockpit
@@ -67,12 +57,11 @@ camera.near = 1
 camera.far = 60000
 cameras.push(camera)
 
-// secondary (external) cameras, derived from the main
+// set up two secondary (external) cameras, derived from the main
 cameras.push(camera.clone())
 cameras.push(camera.clone())
 
-// initial position of the static external camera,
-// relative to the aircraft
+// initial position of "wingman view" camera
 const externalCameraPosition = {
   distance: 50,
   compass: 0,
@@ -80,49 +69,34 @@ const externalCameraPosition = {
   inclination: 90,
 }
 
-let cameraIndex = 0
-
+// set up container object for the 3D aircraft model
 const f16 = new THREE.Object3D()
 f16.visible = false
 scene.add(f16)
 
-const objectChaser = new ObjectChaser(f16)
+// load the actual aircraft model into the scene
+loadAircraftModel(f16)
 
-const manager = new THREE.LoadingManager()
-new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
-  materials.preload()
+// register positions and orientations of aircraft object,
+// to be sent to the "chase camera"
+const chaseObject = new ChaseObject(f16)
 
-  new OBJLoader(manager)
-    .setMaterials(materials)
-    .setPath("f16/")
-    .load(
-      "f16.obj",
-      (object) => {
-        // center the model at its center of gravity
-        object.position.set(0, 2, -2.5)
+// read out start position and direction
+const url = new URL(document.location)
+const urlParams = url.searchParams
+const startPoint = getStartpointFromParameters(urlParams)
+const startDirection = urlParams.get("c") || 0
 
-        // align model with world axes
-        object.rotateX(90 * THREE.MathUtils.DEG2RAD)
-        object.rotateY(180 * THREE.MathUtils.DEG2RAD)
-        object.updateMatrixWorld()
+const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
+terrain.initialize(camera, startPoint, startDirection)
 
-        f16.add(object)
-      },
-      (xhr) => {},
-      (error) => {
-        console.log("Could not load 3d model: " + error)
-      }
-    )
-})
+// set up physics simulation
+const f16simulation = new F16Simulation()
+const airplaneState = new StateVector()
+airplaneState.init(startPoint, startDirection)
+const airplaneControlInput = new InputVector()
 
-const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
-renderer.setPixelRatio(window.devicePixelRatio)
-renderer.setSize(window.innerWidth, window.innerHeight)
-renderer.outputEncoding = THREE.sRGBEncoding
-
-let gamepad = null
-let engineSound
-
+// set up various event handlers
 const startButton = document.getElementById("start")
 startButton.addEventListener("click", start)
 
@@ -140,26 +114,7 @@ window.addEventListener("gamepaddisconnected", (event) => {
   gamepad = null
 })
 
-const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
-terrain.initialize(camera, startPoint, startDirection)
-
-const f16simulation = new F16Simulation()
-
-const airplaneState = new StateVector()
-airplaneState.xe = startPoint[0] * SimulationConstants.METERS_TO_FEET
-airplaneState.xn = startPoint[1] * SimulationConstants.METERS_TO_FEET
-airplaneState.h = startPoint[2] * SimulationConstants.METERS_TO_FEET
-
-airplaneState.psi = startDirection * THREE.MathUtils.DEG2RAD
-
-airplaneState.vt = 500 // feet/sec, ~ km/t
-airplaneState.pow = 60 // % thrust
-
-const airplaneControlInput = new InputVector()
-airplaneControlInput.throttle = 0.6
-airplaneControlInput.elevator = SimulationConstants.ELEVATOR_TRIM
-
-// Log scene stats
+// log scene stats
 setInterval(() => {
   //  console.log("Time offset: " + (new Date().getTime() - startTime))
   console.log("Tiles loaded: " + Tile.loadCount)
@@ -168,14 +123,14 @@ setInterval(() => {
   console.log("Triangles rendered: " + renderer.info.render.triangles)
 }, 3000)
 
-// register points every N ms
+// register flight trail points every N ms
 setInterval(() => {
-  objectChaser.addPoint(f16)
-}, ObjectChaser.timeInterval)
+  chaseObject.addPoint(f16)
+}, ChaseObject.timeInterval)
 
+// the actual program startup
 async function start() {
   const audioContext = new window.AudioContext()
-
   await audioContext.audioWorklet.addModule("js/audio/brown-noise-processor.js")
   engineSound = new EngineSound()
 
@@ -186,38 +141,6 @@ async function start() {
   document.getElementById("buttoncontainer").style.display = "none"
   canvas.style.display = "block"
 
-  let isMobile = false
-  if ("maxTouchPoints" in navigator) {
-    isMobile = navigator.maxTouchPoints > 0
-  }
-
-  if (isMobile) {
-    // reduce triangle counts
-    camera.far = 40000
-    scene.fog = new THREE.FogExp2(scene.background, 0.00004)
-
-    // device tilt = aircraft control
-    if (
-      window.DeviceOrientationEvent !== undefined &&
-      typeof window.DeviceOrientationEvent.requestPermission === "function"
-    ) {
-      window.DeviceOrientationEvent.requestPermission()
-        .then((response) => {
-          if (response == "granted") {
-            window.addEventListener("deviceorientation", (event) => readDeviceOrientation(event))
-          }
-        })
-        .catch((error) => {
-          console.error("Unable to use DeviceOrientation API:", error)
-        })
-    } else {
-      window.addEventListener("deviceorientation", (event) => readDeviceOrientation(event))
-    }
-
-    // tap screen = cycle cameras
-    window.addEventListener("touchstart", () => nextCamera())
-  }
-
   resetViewport()
   drawScene()
 }
@@ -225,7 +148,7 @@ async function start() {
 function drawScene(currentFrametime) {
   requestAnimationFrame(drawScene)
 
-  frameTime = currentFrametime - previousFrameTime || 0
+  let frameTime = currentFrametime - previousFrameTime || 0
   previousFrameTime = currentFrametime
 
   if (gamepad) {
@@ -236,18 +159,7 @@ function drawScene(currentFrametime) {
 
   const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
-
-  f16.quaternion.identity()
-  f16.rotateZ(-airplaneState.psi)
-  f16.rotateY(airplaneState.phi)
-  f16.rotateX(airplaneState.theta)
-
-  f16.position.set(
-    airplaneState.xe * SimulationConstants.FEET_TO_METERS,
-    airplaneState.xn * SimulationConstants.FEET_TO_METERS,
-    airplaneState.h * SimulationConstants.FEET_TO_METERS
-  )
-  f16.updateMatrixWorld()
+  airplaneState.updateAircraftModel(f16)
 
   // always update master camera
   cameras[0].position.copy(f16.position)
@@ -255,56 +167,96 @@ function drawScene(currentFrametime) {
   cameras[0].rotateX(90 * THREE.MathUtils.DEG2RAD)
   cameras[0].updateMatrixWorld()
 
-  const cameraData = objectChaser.getPoint(frameTime)
+  const cameraData = chaseObject.getPoint(frameTime)
 
   // update current camera - derived from the master camera
-  switch (cameraIndex) {
+  switch (currentCamera) {
     case 1:
-      cameras[cameraIndex] = camera.clone()
-      cameras[cameraIndex].position.copy(cameraData.position)
-      cameras[cameraIndex].quaternion.copy(cameraData.quaternion)
-      cameras[cameraIndex].rotateX(90 * THREE.MathUtils.DEG2RAD)
-      cameras[cameraIndex].updateMatrixWorld()
+      cameras[currentCamera] = camera.clone()
+      cameras[currentCamera].position.copy(cameraData.position)
+      cameras[currentCamera].quaternion.copy(cameraData.quaternion)
+      cameras[currentCamera].rotateX(90 * THREE.MathUtils.DEG2RAD)
+      cameras[currentCamera].updateMatrixWorld()
       break
     case 2:
-      cameras[cameraIndex] = camera.clone()
-      cameras[cameraIndex].lookAt(f16.position)
-      cameras[cameraIndex].rotateZ(externalCameraPosition.compass * THREE.MathUtils.DEG2RAD) // compass
-      cameras[cameraIndex].rotateX(externalCameraPosition.inclination * THREE.MathUtils.DEG2RAD) // above / below horizon
-      cameras[cameraIndex].translateZ(externalCameraPosition.distance)
-      cameras[cameraIndex].updateMatrixWorld()
+      cameras[currentCamera] = camera.clone()
+      cameras[currentCamera].lookAt(f16.position)
+      cameras[currentCamera].rotateZ(externalCameraPosition.compass * THREE.MathUtils.DEG2RAD) // compass
+      cameras[currentCamera].rotateX(externalCameraPosition.inclination * THREE.MathUtils.DEG2RAD) // above / below horizon
+      cameras[currentCamera].translateZ(externalCameraPosition.distance)
+      cameras[currentCamera].updateMatrixWorld()
 
       externalCameraPosition.compass += externalCameraPosition.compassSpeed
       break
   }
 
-  if (updateResources) terrain.update(camera, showWireFrame)
+  terrain.update(camera, showWireFrame)
   engineSound.setOutput(airplaneState.pow)
 
-  renderer.render(scene, cameras[cameraIndex])
+  renderer.render(scene, cameras[currentCamera])
 }
 
-function readDeviceOrientation(event) {
-  airplaneControlInput.aileron = event.beta * 0.15
-  airplaneControlInput.elevator = (-event.gamma + 30) * 0.15
+function getStartpointFromParameters(urlParams) {
+  // set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
+  let east = urlParams.get("e") || 105000
+  let north = urlParams.get("n") || 6958000
+  const alt = urlParams.get("a") || 3000
+
+  // if input coordinates are GPS lat/lon, convert to utm33
+  if (north < 72 && east < 33) {
+    const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
+    const utm = proj4(utm33NProjection, [Number(east), Number(north)])
+    east = utm[0]
+    north = utm[1]
+  }
+  return [east, north, alt]
+}
+
+function loadAircraftModel(f16) {
+  const manager = new THREE.LoadingManager()
+  new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
+    materials.preload()
+
+    new OBJLoader(manager)
+      .setMaterials(materials)
+      .setPath("f16/")
+      .load(
+        "f16.obj",
+        (object) => {
+          // center the model at its center of gravity
+          object.position.set(0, 2, -2.5)
+
+          // align model with world axes
+          object.rotateX(90 * THREE.MathUtils.DEG2RAD)
+          object.rotateY(180 * THREE.MathUtils.DEG2RAD)
+          object.updateMatrixWorld()
+
+          f16.add(object)
+        },
+        (xhr) => {},
+        (error) => {
+          console.log("Could not load 3d model: " + error)
+        }
+      )
+  })
 }
 
 function nextCamera() {
-  cameraIndex++
-  cameraIndex %= cameras.length
-  if (cameraIndex === 0) f16.visible = false
-  if (cameraIndex === 1) f16.visible = true
-  if (cameraIndex === 2) f16.visible = true
+  currentCamera++
+  currentCamera %= cameras.length
+  if (currentCamera === 0) f16.visible = false
+  if (currentCamera === 1) f16.visible = true
+  if (currentCamera === 2) f16.visible = true
 }
 
 function keyboardHandler(keyboardEvent) {
   switch (keyboardEvent.key) {
-    case "ArrowDown": // elevator up
+    case "ArrowDown": // elevator surface up
       airplaneControlInput.elevator -= 0.3
       keyboardEvent.stopPropagation()
       keyboardEvent.preventDefault()
       break
-    case "ArrowUp": // elevator down
+    case "ArrowUp": // elevator surface down
       airplaneControlInput.elevator += 0.3
       keyboardEvent.stopPropagation()
       keyboardEvent.preventDefault()

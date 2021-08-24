@@ -1,3 +1,4 @@
+import SimulationConstants from "./simulationconstants.js"
 /**
  * State vector for F16 simulator.
  */
@@ -17,6 +18,31 @@ export default class StateVector {
     this.xe = 0 // ft
     this.h = 0 // ft
     this.pow = 0 // percent, 0 <= pow <= 100
+  }
+
+  init(startPoint, startDirection) {
+    this.xe = startPoint[0] * SimulationConstants.METERS_TO_FEET
+    this.xn = startPoint[1] * SimulationConstants.METERS_TO_FEET
+    this.h = startPoint[2] * SimulationConstants.METERS_TO_FEET
+
+    this.psi = startDirection * SimulationConstants.DTOR
+
+    this.vt = 500 // feet/sec, ~ km/t
+    this.pow = 60 // % thrust
+  }
+
+  updateAircraftModel(f16) {
+    f16.quaternion.identity()
+    f16.rotateZ(-this.psi)
+    f16.rotateY(this.phi)
+    f16.rotateX(this.theta)
+
+    f16.position.set(
+      this.xe * SimulationConstants.FEET_TO_METERS,
+      this.xn * SimulationConstants.FEET_TO_METERS,
+      this.h * SimulationConstants.FEET_TO_METERS
+    )
+    f16.updateMatrixWorld()
   }
 
   /**

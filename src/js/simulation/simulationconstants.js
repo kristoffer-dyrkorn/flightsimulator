@@ -31,6 +31,7 @@ SimulationConstants.CBAR = 11.32
 SimulationConstants.G = 32.174 // gravitational constant, ft/sec^2
 SimulationConstants.HE = 160.0
 SimulationConstants.RTOD = 57.29578
+SimulationConstants.DTOR = 0.0174533
 SimulationConstants.S = 300.0
 SimulationConstants.XCGR = 0.35 // reference center of gravity along x axis
 SimulationConstants.XCG = 0.3 // center of gravity along x axis
@@ -66,5 +67,5 @@ SimulationConstants.c = [
     SimulationConstants.GAMMA,
   SimulationConstants.IXX / SimulationConstants.GAMMA,
   SimulationConstants.MASS,
-  SimulationConstants.XCG
+  SimulationConstants.XCG,
 ]

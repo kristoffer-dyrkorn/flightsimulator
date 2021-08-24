@@ -1,6 +1,6 @@
 import * as THREE from "./three.module.js"
 
-export default class ObjectChaser {
+export default class ChaseObject {
   constructor(target) {
     // move chase camera 0.8s after target moves
     this.timeDelay = 800
@@ -24,22 +24,22 @@ export default class ObjectChaser {
 
   getPoint(frameTime) {
     // return first point until buffer is large enough to support the time delay
-    if (this.points.length * ObjectChaser.timeInterval < this.timeDelay) {
+    if (this.points.length * ChaseObject.timeInterval < this.timeDelay) {
       return { position: this.points[0].position, quaternion: this.points[0].quaternion }
     }
 
     this.accumulatedTime += frameTime
 
     // if we cross the next data point in time
-    if (this.accumulatedTime > ObjectChaser.timeInterval) {
+    if (this.accumulatedTime > ChaseObject.timeInterval) {
       // adjust time
-      this.accumulatedTime -= ObjectChaser.timeInterval
+      this.accumulatedTime -= ChaseObject.timeInterval
       // remove oldest point so we still can interpolate between point[0] and point[1]
       this.points.shift()
     }
 
     // find interpolator t
-    const t = this.accumulatedTime / ObjectChaser.timeInterval
+    const t = this.accumulatedTime / ChaseObject.timeInterval
 
     const currPosition = this.points[0].position
     const nextPosition = this.points[1].position
@@ -54,4 +54,4 @@ export default class ObjectChaser {
 }
 
 // register points every 0.1 s
-ObjectChaser.timeInterval = 100
+ChaseObject.timeInterval = 100

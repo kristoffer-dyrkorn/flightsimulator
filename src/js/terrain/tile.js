@@ -1,7 +1,7 @@
 import * as THREE from "../graphics/three.module.js"
 import { BasisTextureLoader } from "../graphics/BasisTextureLoader.js"
 
-// const SERVER = "https://s3-eu-west-1.amazonaws.com/kd-flightsim/"
+// const SERVER = "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 const SERVER = ""
 
 export default class Tile {
@@ -23,7 +23,7 @@ export default class Tile {
     this.tileMesh.updateMatrixWorld()
 
     this.tileMesh.geometry = new THREE.BufferGeometry()
-    // use a very simple material, all light and shading info is baked into the texture
+    // use a very simple material, all light and shading of terrain is baked into the texture
     this.tileMesh.material = new THREE.MeshBasicMaterial()
   }
 
@@ -58,12 +58,12 @@ export default class Tile {
       this.scene.remove(this.tileMesh)
 
       // dispose, ie empty, the geometry and material data
-      // but do not null the objects
+      // but do not null the geometry and material objects
       this.tileMesh.material.map.dispose()
       this.tileMesh.material.map = null
 
-      // since, when we load a tile we re-populate the existing objects
-      // this way we save object removal, GC and re-allocation
+      // when we load a tile we re-populate the existing objects
+      // this way we reduce GC and re-allocation of memory
       this.tileMesh.material.dispose()
       this.tileMesh.geometry.dispose()
 
@@ -73,7 +73,7 @@ export default class Tile {
   }
 
   load() {
-    fetch(`${SERVER}meshes/${this.tileName}.msh`, { mode: "cors" }).then((response) => {
+    fetch(`${SERVER}/meshes/${this.tileName}.msh`, { mode: "cors" }).then((response) => {
       response.arrayBuffer().then((buffer) => {
         let offset = 0
         const stride = Uint16Array.BYTES_PER_ELEMENT
@@ -101,7 +101,7 @@ export default class Tile {
         this.tileMesh.geometry.index = indexAttribute
 
         Tile.basisLoader.load(
-          `${SERVER}texture/${this.tileName}.basis`,
+          `${SERVER}/texture/${this.tileName}.basis`,
           (texture) => {
             texture.encoding = THREE.sRGBEncoding
             texture.anisotropy = 4
