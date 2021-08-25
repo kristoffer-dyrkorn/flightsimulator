@@ -75,27 +75,7 @@ export default class Tile {
   load() {
     fetch(`${SERVER}/meshes/${this.tileName}.msh`, { mode: "cors" }).then((response) => {
       response.arrayBuffer().then((buffer) => {
-        let offset = 0
-        const stride = Uint16Array.BYTES_PER_ELEMENT
-
-        const vertexCount = new Uint16Array(buffer, offset, 1)[0]
-        offset += stride * 1 // read 1 uint16
-
-        const vertices = new Uint16Array(buffer, offset, 3 * vertexCount)
-        offset += stride * 3 * vertexCount // 1 vertex = 3 coordinates
-
-        const uvs = new Uint16Array(buffer, offset, 2 * vertexCount)
-        offset += stride * 2 * vertexCount // 1 vertex = 2 texture coordinates
-
-        const triangleCount = new Uint16Array(buffer, offset, 1)[0]
-        offset += stride * 1 // read 1 uint16
-
-        const triangles = new Uint16Array(buffer, offset, 3 * triangleCount) // 1 triangle = 3 indices
-
-        const posAttribute = new THREE.BufferAttribute(vertices, 3)
-        const uvAttribute = new THREE.BufferAttribute(uvs, 2, true) // uv coordinates must be normalized, ie scaled to 0..1
-        const indexAttribute = new THREE.BufferAttribute(triangles, 1)
-
+        const [posAttribute, uvAttribute, indexAttribute] = this.getVertexData(buffer)
         this.tileMesh.geometry.setAttribute("position", posAttribute)
         this.tileMesh.geometry.setAttribute("uv", uvAttribute)
         this.tileMesh.geometry.index = indexAttribute
@@ -123,6 +103,31 @@ export default class Tile {
         )
       })
     })
+  }
+
+  getVertexData(buffer) {
+    let offset = 0
+    const stride = Uint16Array.BYTES_PER_ELEMENT
+
+    const vertexCount = new Uint16Array(buffer, offset, 1)[0]
+    offset += stride * 1 // read 1 uint16
+
+    const vertices = new Uint16Array(buffer, offset, 3 * vertexCount)
+    offset += stride * 3 * vertexCount // 1 vertex = 3 coordinates
+
+    const uvs = new Uint16Array(buffer, offset, 2 * vertexCount)
+    offset += stride * 2 * vertexCount // 1 vertex = 2 texture coordinates
+
+    const triangleCount = new Uint16Array(buffer, offset, 1)[0]
+    offset += stride * 1 // read 1 uint16
+
+    const triangles = new Uint16Array(buffer, offset, 3 * triangleCount) // 1 triangle = 3 indices
+
+    const posAttribute = new THREE.BufferAttribute(vertices, 3)
+    const uvAttribute = new THREE.BufferAttribute(uvs, 2, true) // uv coordinates must be normalized, ie scaled to 0..1
+    const indexAttribute = new THREE.BufferAttribute(triangles, 1)
+
+    return [posAttribute, uvAttribute, indexAttribute]
   }
 }
 
