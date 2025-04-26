@@ -27,7 +27,7 @@ export default class StateVector {
 
     this.psi = startDirection * SimulationConstants.DTOR
 
-    this.vt = 500 // feet/sec, ~ km/t
+    this.vt = 506 // feet/sec, ~ km/t => 300 knots
     this.pow = 60 // % thrust
   }
 

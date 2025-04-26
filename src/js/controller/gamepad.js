@@ -7,7 +7,7 @@ export default class Gamepad {
     this.buttons = []
 
     // map joystick deflection to rudder deflection
-    this.sensitivity = 0.3
+    this.sensitivity = 0.15
   }
 
   read(airplaneControlInput) {

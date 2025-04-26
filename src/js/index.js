@@ -123,6 +123,19 @@ setInterval(() => {
   console.log("Triangles rendered: " + renderer.info.render.triangles)
 }, 3000)
 
+setInterval(() => {
+  const heading = THREE.MathUtils.RAD2DEG * airplaneState.psi
+  if (heading < 0) heading += 360
+  if (heading > 360) heading -= 360
+
+  document.getElementById("status").textContent = `SPD ${(0.592484 * airplaneState.vt).toFixed(0)} -
+  ALT ${airplaneState.h.toFixed(0)} -
+  THR ${airplaneState.pow.toFixed(0)}% -
+  HDG ${heading.toFixed(0)} -
+  PTC ${(THREE.MathUtils.RAD2DEG * airplaneState.theta).toFixed(0)} -
+  AOA ${(THREE.MathUtils.RAD2DEG * airplaneState.alpha).toFixed(0)}`
+}, 300)
+
 // register flight trail points every N ms
 setInterval(() => {
   chaseObject.addPoint(f16)

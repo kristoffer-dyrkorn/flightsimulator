@@ -1,16 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <title>Flight</title>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, user-scalable=no" />
-</head>
-<body style="margin: 0; overflow: hidden">
-  <script src="js/proj4.js"></script>
-  <div id="buttoncontainer" style="display: flex; justify-content: center; align-items: center; height: 100vh; background: rgba(0,0,0,0.7);">
-    <button id="start" style="background-color: black ;color:grey; font-size: 40px; padding: 10px 20px">START</button>
-  </div>
-  <canvas id="webgl" style="display: none;"></canvas>
-  <script type="module" src="js/index.js"></script>
-</body>
+  <head>
+    <title>Flight</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, user-scalable=no" />
+  </head>
+  <body style="margin: 0; overflow: hidden">
+    <script src="js/proj4.js"></script>
+    <div
+      id="buttoncontainer"
+      style="display: flex; justify-content: center; align-items: center; height: 100vh; background: rgba(0, 0, 0, 0.7)"
+    >
+      <button id="start" style="background-color: black; color: grey; font-size: 40px; padding: 10px 20px">
+        START
+      </button>
+    </div>
+    <canvas id="webgl" style="display: none"></canvas>
+    <div
+      style="
+        position: absolute;
+        bottom: 0;
+        width: 100%;
+        background-color: black;
+        color: white;
+        font-family: Arial, Helvetica, sans-serif;
+      "
+      id="status"
+    ></div>
+    <script type="module" src="js/index.js"></script>
+  </body>
 </html>

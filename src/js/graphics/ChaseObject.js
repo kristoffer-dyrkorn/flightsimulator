@@ -2,8 +2,8 @@ import * as THREE from "./three.module.js"
 
 export default class ChaseObject {
   constructor(target) {
-    // move chase camera 0.8s after target moves
-    this.timeDelay = 800
+    // move chase camera 0.5s after target moves
+    this.timeDelay = 500
 
     // initialise buffer with start point
     this.points = []
