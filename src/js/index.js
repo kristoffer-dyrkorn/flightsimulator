@@ -213,7 +213,7 @@ function getStartpointFromParameters(urlParams) {
   // set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
   let east = urlParams.get("e") || 105000
   let north = urlParams.get("n") || 6958000
-  const alt = urlParams.get("a") || 3000
+  const alt = urlParams.get("a") || 1524 // 5000 ft
 
   // if input coordinates are GPS lat/lon, convert to utm33
   if (north < 72 && east < 33) {
