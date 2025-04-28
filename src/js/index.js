@@ -9,6 +9,7 @@ import F16Simulation from "./simulation/f16simulation.js"
 import ChaseObject from "./graphics/ChaseObject.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
+import HUDObject from "./graphics/HUDObject.js"
 
 // terrain boundaries, in UTM33 coordinates
 const MINX = -100000
@@ -29,6 +30,9 @@ const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true })
 renderer.setPixelRatio(window.devicePixelRatio)
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.outputEncoding = THREE.sRGBEncoding
+
+const hudCanvas = document.getElementById("hud")
+const hud = new HUDObject(hudCanvas)
 
 const scene = new THREE.Scene()
 // NOTE this makes all objects STATIC
@@ -57,6 +61,8 @@ camera.near = 1
 camera.far = 60000
 cameras.push(camera)
 
+scene.add(camera)
+
 // set up two secondary (external) cameras, derived from the main
 cameras.push(camera.clone())
 cameras.push(camera.clone())
@@ -73,6 +79,17 @@ const externalCameraPosition = {
 const f16 = new THREE.Object3D()
 f16.visible = false
 scene.add(f16)
+
+const hudGeometry = new THREE.PlaneGeometry(5, 5)
+const hudMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 })
+const hudTexture = new THREE.CanvasTexture(hudCanvas)
+hudMaterial.map = hudTexture
+hudMaterial.transparent = true
+
+const hudPlane = new THREE.Mesh(hudGeometry, hudMaterial)
+hudPlane.position.set(0, 0.1, -3.5)
+hudPlane.updateMatrixWorld()
+camera.add(hudPlane)
 
 // load the actual aircraft model into the scene
 loadAircraftModel(f16)
@@ -124,9 +141,9 @@ setInterval(() => {
 }, 3000)
 
 setInterval(() => {
-  const heading = THREE.MathUtils.RAD2DEG * airplaneState.psi
+  let heading = THREE.MathUtils.RAD2DEG * airplaneState.psi
   if (heading < 0) heading += 360
-  if (heading > 360) heading -= 360
+  if (heading > 359) heading -= 360
 
   document.getElementById("status").textContent = `SPD ${(0.592484 * airplaneState.vt).toFixed(0)} -
   ALT ${airplaneState.h.toFixed(0)} -
@@ -134,6 +151,10 @@ setInterval(() => {
   HDG ${heading.toFixed(0)} -
   PTC ${(THREE.MathUtils.RAD2DEG * airplaneState.theta).toFixed(0)} -
   AOA ${(THREE.MathUtils.RAD2DEG * airplaneState.alpha).toFixed(0)}`
+
+  hud.update(airplaneState)
+  hud.draw()
+  hudTexture.needsUpdate = true
 }, 300)
 
 // register flight trail points every N ms
@@ -153,6 +174,7 @@ async function start() {
   // remove start button
   document.getElementById("buttoncontainer").style.display = "none"
   canvas.style.display = "block"
+  //hudCanvas.style.display = "block"
 
   resetViewport()
   drawScene()
@@ -257,9 +279,18 @@ function loadAircraftModel(f16) {
 function nextCamera() {
   currentCamera++
   currentCamera %= cameras.length
-  if (currentCamera === 0) f16.visible = false
-  if (currentCamera === 1) f16.visible = true
-  if (currentCamera === 2) f16.visible = true
+  if (currentCamera === 0) {
+    f16.visible = false
+    hudPlane.visible = true
+  }
+  if (currentCamera === 1) {
+    f16.visible = true
+    hudPlane.visible = false
+  }
+  if (currentCamera === 2) {
+    f16.visible = true
+    hudPlane.visible = false
+  }
 }
 
 function keyboardHandler(keyboardEvent) {
