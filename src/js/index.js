@@ -304,6 +304,9 @@ function keyboardHandler(keyboardEvent) {
     case "a":
       airplaneControlInput.throttle -= 0.1
       break
+    case "h": // hud toggle
+      hudPlane.visible = !hudPlane.visible
+      break
     case "z": // rudder left
       airplaneControlInput.rudder += 0.3
       break
