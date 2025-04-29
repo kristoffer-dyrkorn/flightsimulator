@@ -140,12 +140,6 @@ setInterval(() => {
   console.log("Triangles rendered: " + renderer.info.render.triangles)
 }, 3000)
 
-setInterval(() => {
-  hud.update(airplaneState)
-  hud.draw()
-  hudTexture.needsUpdate = true
-}, 100)
-
 // register flight trail points every N ms
 setInterval(() => {
   chaseObject.addPoint(f16)
@@ -184,6 +178,10 @@ function drawScene(currentFrametime) {
   const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
   airplaneState.updateAircraftModel(f16)
+
+  hud.update(airplaneState)
+  hud.draw()
+  hudTexture.needsUpdate = true
 
   // always update master camera
   cameras[0].position.copy(f16.position)
