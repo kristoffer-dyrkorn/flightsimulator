@@ -87,10 +87,7 @@ export default class HUDObject {
     this.ctx.beginPath()
 
     for (let deg = -20; deg < 20; deg += 5) {
-      const offset = 5000 * Math.sin(this.pitch + THREE.MathUtils.DEG2RAD * deg)
-
-      // negate value and add extra space before minus sign
-      const degString = deg > 0 ? `- ${deg}` : Math.abs(deg)
+      const offset = 5000 * Math.sin((this.pitch + THREE.MathUtils.DEG2RAD * deg) * 0.2)
 
       if (deg === 0) {
         this.ctx.moveTo(-200, offset)
@@ -101,8 +98,8 @@ export default class HUDObject {
       } else {
         this.ctx.moveTo(-100, offset)
         this.ctx.lineTo(100, offset)
-        this.ctx.fillText(degString, -130, offset)
-        this.ctx.fillText(degString, 120, offset)
+        this.ctx.fillText(-deg, -130, offset)
+        this.ctx.fillText(-deg, 120, offset)
       }
     }
 
@@ -112,7 +109,7 @@ export default class HUDObject {
 
   drawFlightPathMarker() {
     this.ctx.translate(this.width / 2, this.height / 2)
-    const offset = 5000 * Math.sin(this.pitch - this.aoa)
+    const offset = 5000 * Math.sin((this.pitch - this.aoa) * 0.2)
 
     this.ctx.beginPath()
 
