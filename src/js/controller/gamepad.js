@@ -14,7 +14,7 @@ export default class Gamepad {
     this.getInput()
 
     airplaneControlInput.aileron = -this.axes[0] * this.sensitivity * SimulationConstants.AILERON_MAX
-    airplaneControlInput.elevator = -this.axes[1] * this.sensitivity * SimulationConstants.ELEVATOR_MAX
+    airplaneControlInput.elevator = (-this.axes[1] + 0.1) * this.sensitivity * SimulationConstants.ELEVATOR_MAX
 
     airplaneControlInput.elevator += SimulationConstants.ELEVATOR_TRIM
 
