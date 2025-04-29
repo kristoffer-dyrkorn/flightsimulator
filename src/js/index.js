@@ -155,7 +155,7 @@ setInterval(() => {
   hud.update(airplaneState)
   hud.draw()
   hudTexture.needsUpdate = true
-}, 300)
+}, 200)
 
 // register flight trail points every N ms
 setInterval(() => {
