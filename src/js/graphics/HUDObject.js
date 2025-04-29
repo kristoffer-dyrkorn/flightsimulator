@@ -20,8 +20,13 @@ export default class HUDObject {
 
   update(airplaneState) {
     this.heading = Math.round(THREE.MathUtils.RAD2DEG * airplaneState.psi)
-    if (this.heading < 0) this.heading += 360
-    if (this.heading > 359) this.heading -= 360
+    while (this.heading < 0) {
+      this.heading += 360
+    }
+
+    if (this.heading > 359) {
+      this.heading -= 360
+    }
 
     this.heading = ("" + this.heading).padStart(3, "0")
 
@@ -113,7 +118,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = (this.height / 2) * (THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa)) * 0.15
+    const offset = (this.height / 2) * (THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa)) * 0.07
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
