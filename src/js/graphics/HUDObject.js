@@ -4,18 +4,18 @@ export default class HUDObject {
   constructor(canvas) {
     this.canvas = canvas
 
-    this.width = 1600
-    this.height = 1600
+    this.width = 800
+    this.height = 800
 
     this.canvas.width = this.width
     this.canvas.height = this.height
 
     this.ctx = this.canvas.getContext("2d")
     this.ctx.lineWidth = 1.7
-    this.ctx.font = "1em Arial"
+    this.ctx.font = "1.5em Monaco"
     this.ctx.textBaseline = "middle"
-    this.ctx.fillStyle = "PaleGreen"
-    this.ctx.strokeStyle = "PaleGreen"
+    this.ctx.fillStyle = "green"
+    this.ctx.strokeStyle = "green"
   }
 
   update(airplaneState) {
@@ -57,7 +57,7 @@ export default class HUDObject {
         adjust = box[0] - 1.5
         this.ctx.moveTo(x - adjust, y - box[1] / 2 - 2)
         this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 2)
-        this.ctx.lineTo(x - adjust + box[0] + 7, y - box[1] / 2 - 1.5 + box[1] / 2)
+        this.ctx.lineTo(x - adjust + box[0] + 12, y - box[1] / 2 - 1.5 + box[1] / 2)
         this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 1.5 + box[1])
         this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5 + box[1])
         this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5)
@@ -72,7 +72,7 @@ export default class HUDObject {
         this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 2)
         this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 1.5 + box[1])
         this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5 + box[1])
-        this.ctx.lineTo(x - adjust - 7, y - box[1] / 2 - 1.5 + box[1] / 2)
+        this.ctx.lineTo(x - adjust - 12, y - box[1] / 2 - 1.5 + box[1] / 2)
         this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5)
         break
     }
@@ -86,20 +86,25 @@ export default class HUDObject {
 
     this.ctx.beginPath()
 
-    for (let deg = -20; deg < 20; deg += 5) {
-      const offset = 5000 * Math.sin((this.pitch + THREE.MathUtils.DEG2RAD * deg) * 0.2)
+    for (let deg = -90; deg <= 90; deg += 5) {
+      const offset = (this.height / 2) * (this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
 
-      if (deg === 0) {
-        this.ctx.moveTo(-200, offset)
+      if (deg > 0) {
+        this.ctx.moveTo(-100, offset)
+        this.ctx.lineTo(100, offset)
+        this.ctx.fillText(-deg, -180, offset)
+        this.ctx.fillText(-deg, 120, offset)
+      } else if (deg === 0) {
+        this.ctx.moveTo(-250, offset)
         this.ctx.lineTo(-50, offset)
 
         this.ctx.moveTo(50, offset)
-        this.ctx.lineTo(200, offset)
+        this.ctx.lineTo(250, offset)
       } else {
         this.ctx.moveTo(-100, offset)
         this.ctx.lineTo(100, offset)
-        this.ctx.fillText(-deg, -130, offset)
-        this.ctx.fillText(-deg, 120, offset)
+        this.ctx.fillText(-deg, -165, offset)
+        this.ctx.fillText(-deg, 130, offset)
       }
     }
 
@@ -109,7 +114,8 @@ export default class HUDObject {
 
   drawFlightPathMarker() {
     this.ctx.translate(this.width / 2, this.height / 2)
-    const offset = 5000 * Math.sin((this.pitch - this.aoa) * 0.2)
+
+    const offset = (this.height / 2) * (THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa)) * 0.15
 
     this.ctx.beginPath()
 
@@ -123,9 +129,9 @@ export default class HUDObject {
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height)
 
-    this.drawText(this.heading, "center", this.width / 2, (3 * this.height) / 5)
-    this.drawText(this.speed, "right", (2 * this.width) / 5, this.height / 2)
-    this.drawText(this.altitude, "left", (3 * this.width) / 5, this.height / 2)
+    this.drawText(this.heading, "center", this.width / 2, 0.9 * this.height)
+    this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
+    this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
     this.drawPitchLadder()
     this.drawFlightPathMarker()

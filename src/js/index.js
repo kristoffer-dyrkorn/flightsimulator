@@ -80,14 +80,14 @@ const f16 = new THREE.Object3D()
 f16.visible = false
 scene.add(f16)
 
-const hudGeometry = new THREE.PlaneGeometry(5, 5)
+const hudGeometry = new THREE.PlaneGeometry(1, 1)
 const hudMaterial = new THREE.MeshBasicMaterial({ color: 0xffff00 })
 const hudTexture = new THREE.CanvasTexture(hudCanvas)
 hudMaterial.map = hudTexture
 hudMaterial.transparent = true
 
 const hudPlane = new THREE.Mesh(hudGeometry, hudMaterial)
-hudPlane.position.set(0, 0.1, -3.5)
+hudPlane.position.set(0, 0, -2)
 hudPlane.updateMatrixWorld()
 camera.add(hudPlane)
 
@@ -141,21 +141,10 @@ setInterval(() => {
 }, 3000)
 
 setInterval(() => {
-  let heading = THREE.MathUtils.RAD2DEG * airplaneState.psi
-  if (heading < 0) heading += 360
-  if (heading > 359) heading -= 360
-
-  document.getElementById("status").textContent = `SPD ${(0.592484 * airplaneState.vt).toFixed(0)} -
-  ALT ${airplaneState.h.toFixed(0)} -
-  THR ${airplaneState.pow.toFixed(0)}% -
-  HDG ${heading.toFixed(0)} -
-  PTC ${(THREE.MathUtils.RAD2DEG * airplaneState.theta).toFixed(0)} -
-  AOA ${(THREE.MathUtils.RAD2DEG * airplaneState.alpha).toFixed(0)}`
-
   hud.update(airplaneState)
   hud.draw()
   hudTexture.needsUpdate = true
-}, 200)
+}, 100)
 
 // register flight trail points every N ms
 setInterval(() => {
