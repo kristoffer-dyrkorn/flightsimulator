@@ -32,7 +32,7 @@ export default class HUDObject {
       maximumFractionDigits: 0,
     })
 
-    this.thrust = airplaneState.pow
+    this.thrust = Math.round(airplaneState.pow)
     this.pitch = airplaneState.theta
     this.roll = airplaneState.phi
     this.aoa = airplaneState.alpha
@@ -90,21 +90,21 @@ export default class HUDObject {
       const offset = (this.height / 2) * (this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
 
       if (deg > 0) {
-        this.ctx.moveTo(-100, offset)
-        this.ctx.lineTo(100, offset)
-        this.ctx.fillText(-deg, -180, offset)
-        this.ctx.fillText(-deg, 120, offset)
+        this.ctx.moveTo(-150, offset)
+        this.ctx.lineTo(150, offset)
+        this.ctx.fillText(-deg, -180, offset + 20)
+        this.ctx.fillText(-deg, 135, offset + 20)
       } else if (deg === 0) {
-        this.ctx.moveTo(-250, offset)
+        this.ctx.moveTo(-300, offset)
         this.ctx.lineTo(-50, offset)
 
         this.ctx.moveTo(50, offset)
-        this.ctx.lineTo(250, offset)
+        this.ctx.lineTo(300, offset)
       } else {
-        this.ctx.moveTo(-100, offset)
-        this.ctx.lineTo(100, offset)
-        this.ctx.fillText(-deg, -165, offset)
-        this.ctx.fillText(-deg, 130, offset)
+        this.ctx.moveTo(-150, offset)
+        this.ctx.lineTo(150, offset)
+        this.ctx.fillText(-deg, -165, offset + 20)
+        this.ctx.fillText(-deg, 145, offset + 20)
       }
     }
 
@@ -113,25 +113,36 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    this.ctx.translate(this.width / 2, this.height / 2)
-
     const offset = (this.height / 2) * (THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa)) * 0.15
 
     this.ctx.beginPath()
-
-    this.ctx.beginPath()
-    this.ctx.arc(0, offset, 5, 0, 2 * Math.PI)
+    this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
     this.ctx.stroke()
 
-    this.ctx.setTransform(1, 0, 0, 1, 0, 0)
+    this.ctx.beginPath()
+    this.ctx.moveTo(this.width / 2, offset + this.height / 2 - 10)
+    this.ctx.lineTo(this.width / 2, offset + this.height / 2 - 22)
+
+    this.ctx.moveTo(this.width / 2 - 35, offset + this.height / 2)
+    this.ctx.lineTo(this.width / 2 - 10, offset + this.height / 2)
+
+    this.ctx.moveTo(this.width / 2 + 10, offset + this.height / 2)
+    this.ctx.lineTo(this.width / 2 + 35, offset + this.height / 2)
+
+    this.ctx.stroke()
   }
 
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height)
 
-    this.drawText(this.heading, "center", this.width / 2, 0.9 * this.height)
+    this.drawText(this.heading, "center", 0.5 * this.width, 0.9 * this.height)
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
+
+    const aoaText = Math.round(this.aoa * THREE.MathUtils.RAD2DEG)
+
+    this.ctx.fillText(`AOA ${aoaText}`, 30, 0.86 * this.height)
+    this.ctx.fillText(`POW ${this.thrust}`, 30, 0.9 * this.height)
 
     this.drawPitchLadder()
     this.drawFlightPathMarker()
