@@ -91,15 +91,12 @@ export default class HUDObject {
 
     this.ctx.beginPath()
 
-    for (let deg = -90; deg <= 90; deg += 5) {
-      const offset = (this.height / 2) * (this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
+    // draw normal lines above horizon
+    for (let deg = 0; deg <= 90; deg += 5) {
+      const offset = -(this.height / 2) * (-this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
 
-      if (deg > 0) {
-        this.ctx.moveTo(-150, offset)
-        this.ctx.lineTo(150, offset)
-        this.ctx.fillText(-deg, -180, offset + 20)
-        this.ctx.fillText(-deg, 135, offset + 20)
-      } else if (deg === 0) {
+      if (deg === 0) {
+        // horizon lines are extra wide
         this.ctx.moveTo(-300, offset)
         this.ctx.lineTo(-50, offset)
 
@@ -107,13 +104,42 @@ export default class HUDObject {
         this.ctx.lineTo(300, offset)
       } else {
         this.ctx.moveTo(-150, offset)
+        this.ctx.lineTo(-50, offset)
+        this.ctx.lineTo(-50, offset + 10)
+
+        this.ctx.moveTo(50, offset + 10)
+        this.ctx.lineTo(50, offset)
         this.ctx.lineTo(150, offset)
-        this.ctx.fillText(-deg, -165, offset + 20)
-        this.ctx.fillText(-deg, 145, offset + 20)
+
+        this.ctx.fillText(deg, -165, offset + 20)
+        this.ctx.fillText(deg, 145, offset + 20)
       }
     }
-
     this.ctx.stroke()
+
+    this.ctx.beginPath()
+
+    // draw stippled lines below horizon
+    this.ctx.setLineDash([15, 5])
+
+    for (let deg = -90; deg < 0; deg += 5) {
+      const offset = -(this.height / 2) * (-this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
+
+      this.ctx.moveTo(-150, offset)
+      this.ctx.lineTo(-50, offset)
+      this.ctx.lineTo(-50, offset - 10)
+
+      this.ctx.moveTo(50, offset - 10)
+      this.ctx.lineTo(50, offset)
+      this.ctx.lineTo(150, offset)
+
+      this.ctx.fillText(-deg, -165, offset + 20)
+      this.ctx.fillText(-deg, 145, offset + 20)
+    }
+    this.ctx.stroke()
+
+    // reset line style and transform
+    this.ctx.setLineDash([])
     this.ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
