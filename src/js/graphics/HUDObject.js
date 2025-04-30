@@ -89,32 +89,39 @@ export default class HUDObject {
     this.ctx.translate(this.width / 2, this.height / 2)
     this.ctx.rotate(-this.roll)
 
+    const pitch = this.pitch * THREE.MathUtils.RAD2DEG
+
     this.ctx.beginPath()
 
     // draw normal lines above horizon
     for (let deg = 0; deg <= 90; deg += 5) {
-      const offset = -(this.height / 2) * (-this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
+      const offset = -(-pitch + deg) * 28
 
-      if (deg === 0) {
-        // horizon lines are extra wide
-        this.ctx.moveTo(-300, offset)
-        this.ctx.lineTo(-50, offset)
+      // only draw pitch lines if they are within +-15 deg of current pitch
+      // ie within borders of the HUD
+      if (Math.abs(pitch - deg) < 15) {
+        if (deg === 0) {
+          // horizon lines are extra wide
+          this.ctx.moveTo(-300, offset)
+          this.ctx.lineTo(-50, offset)
 
-        this.ctx.moveTo(50, offset)
-        this.ctx.lineTo(300, offset)
-      } else {
-        this.ctx.moveTo(-150, offset)
-        this.ctx.lineTo(-50, offset)
-        this.ctx.lineTo(-50, offset + 10)
+          this.ctx.moveTo(50, offset)
+          this.ctx.lineTo(300, offset)
+        } else {
+          this.ctx.moveTo(-150, offset)
+          this.ctx.lineTo(-50, offset)
+          this.ctx.lineTo(-50, offset + 10)
 
-        this.ctx.moveTo(50, offset + 10)
-        this.ctx.lineTo(50, offset)
-        this.ctx.lineTo(150, offset)
+          this.ctx.moveTo(50, offset + 10)
+          this.ctx.lineTo(50, offset)
+          this.ctx.lineTo(150, offset)
 
-        this.ctx.fillText(deg, -165, offset + 20)
-        this.ctx.fillText(deg, 145, offset + 20)
+          this.ctx.fillText(deg, -165, offset + 20)
+          this.ctx.fillText(deg, 145, offset + 20)
+        }
       }
     }
+
     this.ctx.stroke()
 
     this.ctx.beginPath()
@@ -123,18 +130,22 @@ export default class HUDObject {
     this.ctx.setLineDash([15, 5])
 
     for (let deg = -90; deg < 0; deg += 5) {
-      const offset = -(this.height / 2) * (-this.pitch * THREE.MathUtils.RAD2DEG + deg) * 0.15
+      const offset = -(-pitch + deg) * 28
 
-      this.ctx.moveTo(-150, offset)
-      this.ctx.lineTo(-50, offset)
-      this.ctx.lineTo(-50, offset - 10)
+      // only draw pitch lines if they are within +-15 deg of current pitch
+      // ie within borders of the HUD
+      if (Math.abs(pitch - deg) < 15) {
+        this.ctx.moveTo(-150, offset)
+        this.ctx.lineTo(-50, offset)
+        this.ctx.lineTo(-50, offset - 10)
 
-      this.ctx.moveTo(50, offset - 10)
-      this.ctx.lineTo(50, offset)
-      this.ctx.lineTo(150, offset)
+        this.ctx.moveTo(50, offset - 10)
+        this.ctx.lineTo(50, offset)
+        this.ctx.lineTo(150, offset)
 
-      this.ctx.fillText(-deg, -165, offset + 20)
-      this.ctx.fillText(-deg, 145, offset + 20)
+        this.ctx.fillText(-deg, -165, offset + 20)
+        this.ctx.fillText(-deg, 145, offset + 20)
+      }
     }
     this.ctx.stroke()
 
@@ -144,7 +155,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = (this.height / 2) * (THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa)) * 0.07
+    const offset = THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa) * 14
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
