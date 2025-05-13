@@ -1,8 +1,11 @@
 import * as THREE from "../graphics/three.module.js"
 import { BasisTextureLoader } from "../graphics/BasisTextureLoader.js"
 
-// const SERVER = "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
-const SERVER = ""
+const url = new URL(document.location)
+const urlParams = url.searchParams
+
+const TEXTURE_PATH = urlParams.has("v2") ? "texture-v2" : "texture"
+const SERVER = urlParams.has("local") ? "http://localhost:8000" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
 export default class Tile {
   constructor(scene, terrain, tileExtents, lowerLeft) {
@@ -81,7 +84,7 @@ export default class Tile {
         this.tileMesh.geometry.index = indexAttribute
 
         Tile.basisLoader.load(
-          `${SERVER}/texture/${this.tileName}.basis`,
+          `${SERVER}/${TEXTURE_PATH}/${this.tileName}.basis`,
           (texture) => {
             texture.encoding = THREE.sRGBEncoding
             texture.anisotropy = 4
