@@ -179,9 +179,11 @@ function drawScene(currentFrametime) {
   airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
   airplaneState.updateAircraftModel(f16)
 
-  hud.update(airplaneState)
-  hud.draw()
-  hudTexture.needsUpdate = true
+  if (hudPlane.visible) {
+    hud.update(airplaneState)
+    hud.draw()
+    hudTexture.needsUpdate = true
+  }
 
   // always update master camera
   cameras[0].position.copy(f16.position)

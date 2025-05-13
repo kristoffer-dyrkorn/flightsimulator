@@ -106,6 +106,8 @@ export default class F16Simulation {
     const vzDot = q * vx - p * vy + SimulationConstants.G * cth * cph + az
     const den = vx * vx + vz * vz
 
+    xd.vzdot = vzDot
+
     xd.vt = (vx * vxDot + vy * vyDot + vz * vzDot) / vt
     xd.alpha = (vx * vzDot - vz * vxDot) / den
     xd.beta = (vt * vyDot - vy * xd.vt * cbta) / den

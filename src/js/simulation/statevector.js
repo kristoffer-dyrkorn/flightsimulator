@@ -18,6 +18,7 @@ export default class StateVector {
     this.xe = 0 // ft
     this.h = 0 // ft
     this.pow = 0 // percent, 0 <= pow <= 100
+    this.vzdot = 0 // g?
   }
 
   init(startPoint, startDirection) {
@@ -75,5 +76,7 @@ export default class StateVector {
     this.xe += dt * afterburnerFactor * v.xe
     this.h += dt * afterburnerFactor * v.h
     this.pow += dt * v.pow
+
+    this.vzdot += dt * v.vzdot
   }
 }

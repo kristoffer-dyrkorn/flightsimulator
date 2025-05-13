@@ -14,8 +14,8 @@ export default class HUDObject {
     this.ctx.lineWidth = 1.7
     this.ctx.font = "1.5em Monaco"
     this.ctx.textBaseline = "middle"
-    this.ctx.fillStyle = "green"
-    this.ctx.strokeStyle = "green"
+    this.ctx.fillStyle = "#20ff40"
+    this.ctx.strokeStyle = "#20ff40"
   }
 
   update(airplaneState) {
@@ -41,6 +41,8 @@ export default class HUDObject {
     this.pitch = airplaneState.theta
     this.roll = airplaneState.phi
     this.aoa = airplaneState.alpha
+
+    this.g = airplaneState.vzdot
   }
 
   getTextBoundingBox(text) {
@@ -185,6 +187,10 @@ export default class HUDObject {
 
     this.ctx.fillText(`AOA ${aoaText}`, 30, 0.86 * this.height)
     this.ctx.fillText(`POW ${this.thrust}`, 30, 0.9 * this.height)
+
+    const gText = "" + (this.g * 0.0305 + 0.55).toFixed(1)
+
+    this.ctx.fillText(`${gText}G`, 30, 0.2 * this.height)
 
     this.drawPitchLadder()
     this.drawFlightPathMarker()
