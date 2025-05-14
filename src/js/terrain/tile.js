@@ -4,7 +4,14 @@ import { BasisTextureLoader } from "../graphics/BasisTextureLoader.js"
 const url = new URL(document.location)
 const urlParams = url.searchParams
 
-const TEXTURE_PATH = urlParams.has("v2") ? "texture-v2" : "texture"
+let TEXTURE_PATH = "texture"
+
+if (urlParams.has("v2")) {
+  TEXTURE_PATH = "texture-v2"
+} else if (urlParams.has("v3")) {
+  TEXTURE_PATH = "texture-v3"
+}
+
 const SERVER = urlParams.has("local") ? "http://localhost:8000" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
 export default class Tile {
