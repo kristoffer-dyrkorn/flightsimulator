@@ -99,16 +99,16 @@ export default class HUDObject {
     for (let deg = 0; deg <= 90; deg += 5) {
       const offset = -(-pitch + deg) * 28
 
-      // only draw pitch lines if they are within +-15 deg of current pitch
+      // only draw pitch lines if they are within +-8 deg of current pitch
       // ie within borders of the HUD
-      if (Math.abs(pitch - deg) < 15) {
+      if (Math.abs(pitch - deg) < 8) {
         if (deg === 0) {
           // horizon lines are extra wide
-          this.ctx.moveTo(-300, offset)
+          this.ctx.moveTo(-250, offset)
           this.ctx.lineTo(-50, offset)
 
           this.ctx.moveTo(50, offset)
-          this.ctx.lineTo(300, offset)
+          this.ctx.lineTo(250, offset)
         } else {
           this.ctx.moveTo(-150, offset)
           this.ctx.lineTo(-50, offset)
@@ -129,14 +129,14 @@ export default class HUDObject {
     this.ctx.beginPath()
 
     // draw stippled lines below horizon
-    this.ctx.setLineDash([15, 5])
+    this.ctx.setLineDash([17, 7])
 
     for (let deg = -90; deg < 0; deg += 5) {
       const offset = -(-pitch + deg) * 28
 
-      // only draw pitch lines if they are within +-15 deg of current pitch
+      // only draw pitch lines if they are within +-8 deg of current pitch
       // ie within borders of the HUD
-      if (Math.abs(pitch - deg) < 15) {
+      if (Math.abs(pitch - deg) < 8) {
         this.ctx.moveTo(-150, offset)
         this.ctx.lineTo(-50, offset)
         this.ctx.lineTo(-50, offset - 10)
