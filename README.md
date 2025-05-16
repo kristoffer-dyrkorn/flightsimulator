@@ -35,7 +35,8 @@ Arrow keys control aileron and elevator. `z` and `x`: rudder. `q` and `a`: throt
 May 2025:
 
 - Implemented a simple HUD!
-- Significantly better colors and detail in the imagery - based on color-corrected Sentinel-2 images from 2022 and orthophotos of Norway.
+- Significantly better colors and detail in the imagery - based on orthophotos of Norway and color-corrected Sentinel-2 images from 2022.
+- Spatial audio
 
 July 2021:
 
