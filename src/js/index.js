@@ -39,7 +39,7 @@ const scene = new THREE.Scene()
 // i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
 scene.autoUpdate = false
 scene.background = new THREE.Color(0.74, 0.74, 0.82)
-scene.fog = new THREE.FogExp2(scene.background, 0.000035)
+scene.fog = new THREE.FogExp2(scene.background, 0.000045)
 
 // add lights to the scene, to propely display the f16 model
 const directionalLight = new THREE.DirectionalLight(0xcdb5ae, 0.5)
@@ -59,9 +59,10 @@ camera.up.set(0, 0, 1)
 camera.fov = 45
 camera.near = 1
 camera.far = 60000
-cameras.push(camera)
 
 scene.add(camera)
+
+cameras.push(camera)
 
 // set up two secondary (external) cameras, derived from the main
 cameras.push(camera.clone())
@@ -102,7 +103,10 @@ const chaseObject = new ChaseObject(f16)
 const url = new URL(document.location)
 const urlParams = url.searchParams
 const startPoint = getStartpointFromParameters(urlParams)
-const startDirection = urlParams.get("c") || 0
+let startDirection = +urlParams.get("c") || 0
+
+// compensate for unknown offset in compass direction
+startDirection += 8
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 terrain.initialize(camera, startPoint, startDirection)
@@ -215,25 +219,43 @@ function drawScene(currentFrametime) {
   }
 
   terrain.update(camera, showWireFrame)
-  engineSound.setOutput(airplaneState.pow)
+  engineSound.update(cameras[currentCamera], f16, airplaneState.pow)
 
   renderer.render(scene, cameras[currentCamera])
 }
 
+// calculate grid convergence angle
+// https://gis.stackexchange.com/questions/115531/calculating-grid-convergence-true-north-to-grid-north
+function getCompassOffset(east, north) {
+  const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
+  const lonlat = proj4(utm33NProjection).inverse([east, north])
+
+  const utmZone = Math.ceil((lonlat[0] + 180) / 6)
+  const centralMeridian = 6 * utmZone - 183
+  const lonDelta = lonlat[0] - centralMeridian
+
+  const rotation =
+    Math.atan(Math.tan(lonDelta * THREE.Math.DEG2RAD) * Math.sin(lonlat[1] * THREE.Math.DEG2RAD)) * THREE.Math.RAD2DEG
+  return rotation
+}
+
 function getStartpointFromParameters(urlParams) {
   // set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
-  let east = urlParams.get("e") || 105000
-  let north = urlParams.get("n") || 6970000
-  const alt = urlParams.get("a") || 1524 // 5000 ft
+  let east = +urlParams.get("e") || 105000
+  let north = +urlParams.get("n") || 6970000
+  const alt = +urlParams.get("a") || 1524 // 5000 ft
 
   // if input coordinates are GPS lat/lon, convert to utm33
   if (north < 72 && east < 33) {
     const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
-    const utm = proj4(utm33NProjection, [Number(east), Number(north)])
+    const utm = proj4(utm33NProjection, [east, north])
     east = utm[0]
     north = utm[1]
   }
-  return [east, north, alt]
+
+  const rotation = getCompassOffset(east, north)
+
+  return [east, north, alt, rotation]
 }
 
 function loadAircraftModel(f16) {
@@ -248,7 +270,7 @@ function loadAircraftModel(f16) {
         "f16.obj",
         (object) => {
           // center the model at its center of gravity
-          object.position.set(0, 2, -2.5)
+          object.position.set(0, 2, -2.3)
 
           // align model with world axes
           object.rotateX(90 * THREE.MathUtils.DEG2RAD)

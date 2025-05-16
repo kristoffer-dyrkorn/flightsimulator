@@ -28,6 +28,9 @@ export default class HUDObject {
       this.heading -= 360
     }
 
+    // compensate for unknown offset in compass direction
+    this.heading -= 8
+
     this.heading = ("" + this.heading).padStart(3, "0")
 
     this.speed = Math.round(0.592484 * airplaneState.vt)
