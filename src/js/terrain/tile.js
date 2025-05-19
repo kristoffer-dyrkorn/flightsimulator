@@ -4,13 +4,7 @@ import { BasisTextureLoader } from "../graphics/BasisTextureLoader.js"
 const url = new URL(document.location)
 const urlParams = url.searchParams
 
-let TEXTURE_PATH = "texture-v2"
-
-if (urlParams.has("v3")) {
-  TEXTURE_PATH = "texture-v3"
-} else if (urlParams.has("v1")) {
-  TEXTURE_PATH = "texture"
-}
+const TEXTURE_PATH = "texture"
 
 const SERVER = urlParams.has("local") ? "http://localhost:8000" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
