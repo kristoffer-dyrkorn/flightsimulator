@@ -39,7 +39,7 @@ const scene = new THREE.Scene()
 // i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
 scene.autoUpdate = false
 scene.background = new THREE.Color(0.74, 0.74, 0.82)
-scene.fog = new THREE.FogExp2(scene.background, 0.00003)
+scene.fog = new THREE.FogExp2(scene.background, 0.000042)
 
 // add lights to the scene, to propely display the f16 model
 const directionalLight = new THREE.DirectionalLight(0xcdb5ae, 0.5)
