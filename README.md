@@ -52,10 +52,11 @@ April 2021:
 - Start coordinates can be given both as UTM 33N and lat/lon values. A starting direction can also be given. See below for examples.
 - Code has been rewritten to use `three.js`.
 
-## Attributions
+## Credits / attributions
 
 - Terrain elevation data is provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Satellite photos are Copernicus Sentinel-2 data from 2022, provided and processed by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+- Orthophotos are from the [Norwegian Mapping Authority](https://www.kartverket.no), free for non-commercial use
 - Flight dynamics code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 - Node.js http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
@@ -73,7 +74,7 @@ The app can be tried out [here](https://kristoffer-dyrkorn.github.io/flightsimul
 Extra startup parameters:
 
 - Provide starting point coordinates (in UTM 33N or GPS coordinates) using url parameters `e` and `n`. The default start point is south of Molde.
-- Altitude (in metres) can be given using the parameter `a`. Default is 3000 metres.
+- Altitude (in metres) can be given using the parameter `a`. Default is 1500 metres (5000 ft).
 - Start direction (compass angle) can be provided by `c`. Default is 0 degrees, ie due north.
 
 Example: https://kristoffer-dyrkorn.github.io/flightsimulator/?n=6981000&e=110000&a=1000&c=270
