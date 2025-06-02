@@ -2,6 +2,7 @@ export default class AtmosphericModel {
   constructor() {
     this.rmach = 0
     this.qbar = 0
+    this.ps = 0
   }
 
   /**
@@ -16,5 +17,6 @@ export default class AtmosphericModel {
     let rho = 0.002377 * Math.pow(tfac, 4.14)
     this.rmach = vt / Math.sqrt(1.4 * 1716.3 * t)
     this.qbar = 0.5 * rho * vt * vt
+    this.ps = 1715.0 * rho * t
   }
 }
