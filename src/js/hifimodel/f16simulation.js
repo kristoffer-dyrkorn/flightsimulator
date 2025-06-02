@@ -59,7 +59,7 @@ export default class F16Simulation {
   // x = state, ie INTEGRATED state derivative
   // u = user input
 
-  getStateDerivative(x, u) {
+  getStateDerivative(u, x) {
     const g = SimulationConstants.G /* gravity, ft/s^2 */
     const m = SimulationConstants.MASS /* mass, slugs */
     const B = SimulationConstants.B /* span, ft */
@@ -123,6 +123,8 @@ export default class F16Simulation {
 
     /* Leading edge flap setting in degrees */
     const lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
+
+    // TODO: Limit LEF values
 
     const dail = ail / SimulationConstants.AILERON_MAX
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */
