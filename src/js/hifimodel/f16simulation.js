@@ -174,7 +174,6 @@ export default class F16Simulation {
     const [delta_Cy_a20, delta_Cy_a20_lef, delta_Cn_a20, delta_Cn_a20_lef, delta_Cl_a20, delta_Cl_a20_lef] =
       hifi_ailerons(alpha, beta)
 
-    // delta_Cm_ds will be 0, deep-stall effect is ignored
     const [delta_Cnbeta, delta_Clbeta, delta_Cm, eta_el, delta_Cm_ds] = hifi_other_coeffs(alpha, el)
 
     /* XXXXXXXX Cx_tot XXXXXXXX */

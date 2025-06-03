@@ -275,8 +275,12 @@ function _delta_Cm(alpha) {
   return interpolate([HeaderTables.ALPHA1], DataTables.CM9999_ALPHA1_brett, [alpha], [20])
 }
 
+function _delta_Cm_ds(alpha, dele) {
+  return interpolate([HeaderTables.ALPHA1, HeaderTables.DH3], DataTables.CM9999_ALPHA1_DH3, [alpha, dele], [20, 7])
+}
+
 function _eta_el(el) {
-  return interpolate([DH1], DataTables.ETA_DH1_brett, [el], [5])
+  return interpolate([HeaderTables.DH1], DataTables.ETA_DH1_brett, [el], [5])
 }
 
 export function hifi_C(alpha, beta, el) {
@@ -352,5 +356,5 @@ export function hifi_ailerons(alpha, beta) {
 }
 
 export function hifi_other_coeffs(alpha, el) {
-  return [_delta_CNbeta(alpha), _delta_CLbeta(alpha), _delta_Cm(alpha), _eta_el(el), 0]
+  return [_delta_CNbeta(alpha), _delta_CLbeta(alpha), _delta_Cm(alpha), _eta_el(el), _delta_Cm_ds(alpha, el)]
 }
