@@ -18,6 +18,12 @@ export default class F16Simulation {
     this.engineModel = new EngineModel()
   }
 
+  limit(value, min, max) {
+    if (value < min) return min
+    if (value > max) return max
+    return value
+  }
+
   // x = INTEGRATED state derivative
   // xd = "normal" state, ie state derivatives
 
@@ -48,10 +54,6 @@ export default class F16Simulation {
   // https://github.com/johnviljoen/f16_mpc_oop_py/blob/master/Nguyen_m/trimfun.m#L84
   // dLEF = 1.38*UX0(3)*180/pi - 9.05*qbar/ps + 1.45;
 
-  // this model seems incorrect
-  // https://github.com/johnviljoen/f16_mpc_oop_py/blob/master/utils.py#L289
-
-  // TODO: DEFLECTION LIMIT & RATE LIMIT
   setLef(alpha, qbar, ps) {
     return 1.38 * alpha - (9.05 * qbar) / ps + 1.45
   }
@@ -68,13 +70,7 @@ export default class F16Simulation {
     const xcgr = SimulationConstants.XCGR /* reference center of gravity as a fraction of cbar */
     const xcg = SimulationConstants.XCG /* center of gravity as a fraction of cbar. */
 
-    /*
-    Presented in table VI are thrust values for idle, military, and maximum thrust levels. 
-    Engine gyroscopic effects were simulated by represent- ing the engine angular momentum at a fixed value of 216.9 kg-m2/sec
-    (160 slug-ft2/sec).
-    */
-
-    const Heng = 160.0 /* turbine momentum along roll axis. */
+    const Heng = SimulationConstants.HENG /* turbine momentum along roll axis. */
 
     const Jy = SimulationConstants.IYY /* slug-ft^2 */
     const Jxz = SimulationConstants.IXZ /* slug-ft^2 */
@@ -89,8 +85,12 @@ export default class F16Simulation {
     const psi = x.psi
 
     const vt = x.vt /* total velocity */
-    const alpha = x.alpha * SimulationConstants.RTOD /* angle of attack in degrees */
-    const beta = x.beta * SimulationConstants.RTOD /* sideslip angle in degrees */
+    let alpha = x.alpha * SimulationConstants.RTOD /* angle of attack in degrees */
+    let beta = x.beta * SimulationConstants.RTOD /* sideslip angle in degrees */
+
+    alpha = this.limit(alpha, SimulationConstants.ALPHA_MIN, SimulationConstants.ALPHA_MAX)
+    beta = this.limit(beta, SimulationConstants.BETA_MIN, SimulationConstants.BETA_MAX)
+
     const P = x.p /* Roll Rate --- rolling  moment is Lbar */
     const Q = x.q /* Pitch Rate--- pitching moment is M */
     const R = x.r /* Yaw Rate  --- yawing   moment is N */
@@ -116,15 +116,14 @@ export default class F16Simulation {
     this.atmosphericModel.update(vt, alt)
     this.engineModel.update(x.pow, alt, this.atmosphericModel.rmach, u.throttle)
 
-    const T = this.engineModel.thrust /* thrust */
-    const el = u.elevator /* Elevator setting in degrees. */
-    const ail = u.aileron /* Ailerons mex setting in degrees. */
-    const rud = u.rudder /* Rudder setting in degrees. */
+    const T = this.engineModel.thrust
+    const el = this.limit(u.elevator, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
+    const ail = this.limit(u.aileron, SimulationConstants.AILERON_MIN, SimulationConstants.AILERON_MAX)
+    const rud = this.limit(u.rudder, SimulationConstants.RUDDER_MIN, SimulationConstants.RUDDER_MAX)
 
     /* Leading edge flap setting in degrees */
-    const lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
-
-    // TODO: Limit LEF values
+    let lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
+    lef = this.limit(lef, SimulationConstants.LEF_MIN, SimulationConstants.LEF_MAX)
 
     const dail = ail / SimulationConstants.AILERON_MAX
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */
@@ -228,9 +227,9 @@ export default class F16Simulation {
         compute Udot,Vdot, Wdot,(as on NASA report p36)
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
-    const Udot = R * V - Q * W - g * st + (x.qbar * S * Cx_tot) / m + T / m
-    const Vdot = P * W - R * U + g * ct * sphi + (x.qbar * S * Cy_tot) / m
-    const Wdot = Q * U - P * V + g * ct * cphi + (x.qbar * S * Cz_tot) / m
+    const Udot = R * V - Q * W - g * st + (this.atmosphericModel.qbar * S * Cx_tot) / m + T / m
+    const Vdot = P * W - R * U + g * ct * sphi + (this.atmosphericModel.qbar * S * Cy_tot) / m
+    const Wdot = Q * U - P * V + g * ct * cphi + (this.atmosphericModel.qbar * S * Cz_tot) / m
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         vt_dot equation (from S&L, p82)
@@ -254,9 +253,9 @@ export default class F16Simulation {
        compute Pdot, Qdot, and Rdot (as in Stevens and Lewis p32)
        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
-    const L_tot = Cl_tot * x.qbar * S * B /* get moments from coefficients */
-    const M_tot = Cm_tot * x.qbar * S * cbar
-    const N_tot = Cn_tot * x.qbar * S * B
+    const L_tot = Cl_tot * this.atmosphericModel.qbar * S * B /* get moments from coefficients */
+    const M_tot = Cm_tot * this.atmosphericModel.qbar * S * cbar
+    const N_tot = Cn_tot * this.atmosphericModel.qbar * S * B
 
     const denom = Jx * Jz - Jxz * Jxz
 

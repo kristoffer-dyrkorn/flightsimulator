@@ -26,6 +26,7 @@ SimulationConstants.RUDDER_MAX = 30
 SimulationConstants.AILERON_MIN = -21.5
 SimulationConstants.AILERON_MAX = 21.5
 
+SimulationConstants.LEF_MIN = 0
 SimulationConstants.LEF_MAX = 25
 
 SimulationConstants.PI = 3.14159
@@ -45,3 +46,5 @@ SimulationConstants.IXX = 9496.0 // inertial parameters
 SimulationConstants.IYY = 55814.0
 SimulationConstants.IZZ = 63100.0
 SimulationConstants.IXZ = 982.0
+
+SimulationConstants.HENG = 160.0 // engine angular momentum (slug-ft2/sec)

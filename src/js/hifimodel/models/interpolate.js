@@ -1,12 +1,12 @@
 // int **getHyperCube(double **X,double *V,ND_INFO ndinfo){
 
 function getHyperCube(headerTables, parameters, dimensions) {
-  const indexMatrix = [new Array(dimensions.length), new Array(dimensions.length)]
+  const indexMatrix = Array.from({ length: dimensions.length }, () => new Array(2))
 
   for (let i = 0; i < dimensions.length; i++) {
     const indexMax = dimensions[i]
-    xmax = headerTables[i][indexMax - 1]
-    xmin = headerTables[i][0]
+    const xmax = headerTables[i][indexMax - 1]
+    const xmin = headerTables[i][0]
 
     const x = parameters[i]
 
@@ -52,8 +52,8 @@ function linearInterpolate(T, parameters, xPoint, dimensions) {
   let n = dimensions.length
   let nVertices = 1 << n
 
-  const oldT = new Array(nVertices)
-  for (let i = 0; i < nVertices; i++) oldT[i] = T[i]
+  // copy the T array - by *value*
+  let oldT = T.slice()
 
   let dimNum = 0
 
@@ -80,8 +80,8 @@ function linearInterpolate(T, parameters, xPoint, dimensions) {
       } else newT[index2] = f1
     }
 
-    const oldT = new Array(nVertices)
-    for (let i = 0; i < nVertices; i++) oldT[i] = newT[i]
+    // copy the newT array - by *value*
+    oldT = newT.slice()
     n = m
     dimNum++
   }
@@ -92,8 +92,8 @@ function linearInterpolate(T, parameters, xPoint, dimensions) {
 
 export function interpolate(headerTables, dataTable, parameters, dimensions) {
   const indexVector = new Array(dimensions.length)
-  const xPoint = [new Array(dimensions.length), new Array(dimensions.length)]
 
+  const xPoint = Array.from({ length: dimensions.length }, () => new Array(2))
   const indexMatrix = getHyperCube(headerTables, parameters, dimensions)
 
   const nVertices = 1 << dimensions.length
