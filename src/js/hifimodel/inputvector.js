@@ -6,7 +6,7 @@ import SimulationConstants from "./simulationconstants.js"
 
 export default class InputVector {
   constructor() {
-    this.throttle = 0.6
+    this.throttle = 0.3
     this.elevator = SimulationConstants.ELEVATOR_TRIM
 
     this.aileron = 0 // degrees

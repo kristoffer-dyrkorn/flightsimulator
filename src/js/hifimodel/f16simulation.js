@@ -55,7 +55,8 @@ export default class F16Simulation {
   // dLEF = 1.38*UX0(3)*180/pi - 9.05*qbar/ps + 1.45;
 
   setLef(alpha, qbar, ps) {
-    return 1.38 * alpha - (9.05 * qbar) / ps + 1.45
+    const lef = 1.38 * alpha - (9.05 * qbar) / ps + 1.45
+    return this.limit(lef, SimulationConstants.LEF_MIN, SimulationConstants.LEF_MAX)
   }
 
   // x = state, ie INTEGRATED state derivative
@@ -114,16 +115,16 @@ export default class F16Simulation {
     }
 
     this.atmosphericModel.update(vt, alt)
+
     this.engineModel.update(x.pow, alt, this.atmosphericModel.rmach, u.throttle)
 
     const T = this.engineModel.thrust
-    const el = this.limit(u.elevator, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
-    const ail = this.limit(u.aileron, SimulationConstants.AILERON_MIN, SimulationConstants.AILERON_MAX)
-    const rud = this.limit(u.rudder, SimulationConstants.RUDDER_MIN, SimulationConstants.RUDDER_MAX)
+    const el = u.elevator
+    const ail = u.aileron
+    const rud = u.rudder
 
     /* Leading edge flap setting in degrees */
-    let lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
-    lef = this.limit(lef, SimulationConstants.LEF_MIN, SimulationConstants.LEF_MAX)
+    const lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
 
     const dail = ail / SimulationConstants.AILERON_MAX
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */

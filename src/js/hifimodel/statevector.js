@@ -31,7 +31,7 @@ export default class StateVector {
     this.psi = startDirection * SimulationConstants.DTOR
 
     this.vt = 506 // feet/sec, ~ km/t => 300 knots
-    this.pow = 60 // % thrust
+    this.pow = 30 // % thrust
   }
 
   updateAircraftModel(f16) {
@@ -68,9 +68,11 @@ export default class StateVector {
     this.p += dt * v.p
     this.q += dt * v.q
     this.r += dt * v.r
-    this.nx += dt * v.nx
-    this.ny += dt * v.ny
-    this.nz += dt * v.nz
+
+    this.nx = v.nx
+    this.ny = v.ny
+    this.nz = v.nz
+
     this.pow += dt * v.pow
   }
 }

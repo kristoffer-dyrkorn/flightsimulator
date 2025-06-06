@@ -20,6 +20,10 @@ export default class HUDObject {
 
   update(airplaneState) {
     this.heading = Math.round(THREE.MathUtils.RAD2DEG * airplaneState.psi)
+
+    // compensate for unknown offset in compass direction
+    this.heading -= 8
+
     while (this.heading < 0) {
       this.heading += 360
     }
@@ -28,13 +32,8 @@ export default class HUDObject {
       this.heading -= 360
     }
 
-    // compensate for unknown offset in compass direction
-    this.heading -= 8
-
-    this.heading = ("" + this.heading).padStart(3, "0")
-
     this.speed = Math.round(0.592484 * airplaneState.vt)
-    this.altitude = Math.round(airplaneState.h)
+    this.altitude = Math.round(airplaneState.alt)
 
     this.altitude = this.altitude.toLocaleString(undefined, {
       maximumFractionDigits: 0,
@@ -45,7 +44,7 @@ export default class HUDObject {
     this.roll = airplaneState.phi
     this.aoa = airplaneState.alpha
 
-    this.g = airplaneState.vzdot
+    this.g = airplaneState.nz
   }
 
   getTextBoundingBox(text) {
@@ -182,7 +181,9 @@ export default class HUDObject {
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height)
 
-    this.drawText(this.heading, "center", 0.5 * this.width, 0.9 * this.height)
+    const hText = ("" + this.heading).padStart(3, "0")
+
+    this.drawText(hText, "center", 0.5 * this.width, 0.9 * this.height)
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
@@ -191,7 +192,7 @@ export default class HUDObject {
     this.ctx.fillText(`AOA ${aoaText}`, 30, 0.86 * this.height)
     this.ctx.fillText(`POW ${this.thrust}`, 30, 0.9 * this.height)
 
-    const gText = "" + (this.g * 0.0305 + 0.55).toFixed(1)
+    const gText = "" + this.g.toFixed(1)
 
     this.ctx.fillText(`${gText}G`, 30, 0.2 * this.height)
 
