@@ -341,17 +341,17 @@ export function hifi_rudder(alpha, beta) {
   ]
 }
 
-export function hifi_ailerons(alpha, beta) {
+export function hifi_ailerons(alpha, alpha_lef, beta) {
   const value_0 = _Cy_a20(alpha, beta) - _Cy(alpha, beta)
   const value_2 = _Cn_a20(alpha, beta) - _Cn(alpha, beta, 0)
   const value_4 = _Cl_a20(alpha, beta) - _Cl(alpha, beta, 0)
   return [
     value_0,
-    _Cy_a20_lef(alpha, beta) - _Cy_lef(alpha, beta) - value_0,
+    _Cy_a20_lef(alpha_lef, beta) - _Cy_lef(alpha_lef, beta) - value_0,
     value_2,
-    _Cn_a20_lef(alpha, beta) - _Cn_lef(alpha, beta) - value_2,
+    _Cn_a20_lef(alpha_lef, beta) - _Cn_lef(alpha_lef, beta) - value_2,
     value_4,
-    _Cl_a20_lef(alpha, beta) - _Cl_lef(alpha, beta) - value_4,
+    _Cl_a20_lef(alpha_lef, beta) - _Cl_lef(alpha_lef, beta) - value_4,
   ]
 }
 

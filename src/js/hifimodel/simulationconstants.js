@@ -11,6 +11,7 @@ SimulationConstants.POWER_MAX = 1
 
 SimulationConstants.ALPHA_MIN = -20
 SimulationConstants.ALPHA_MAX = 90
+SimulationConstants.ALPHA_MAX_LEF = 45
 
 SimulationConstants.BETA_MIN = -30
 SimulationConstants.BETA_MAX = 30

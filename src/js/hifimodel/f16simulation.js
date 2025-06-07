@@ -89,7 +89,11 @@ export default class F16Simulation {
     let alpha = x.alpha * SimulationConstants.RTOD /* angle of attack in degrees */
     let beta = x.beta * SimulationConstants.RTOD /* sideslip angle in degrees */
 
+    // most calculations are valid for alpha (-20..90 deg)
     alpha = this.limit(alpha, SimulationConstants.ALPHA_MIN, SimulationConstants.ALPHA_MAX)
+
+    // lef calculations are only valid for a smaller alpha range (-20..45 deg)
+    const alpha_lef = this.limit(alpha, SimulationConstants.ALPHA_MIN, SimulationConstants.ALPHA_MAX_LEF)
     beta = this.limit(beta, SimulationConstants.BETA_MIN, SimulationConstants.BETA_MAX)
 
     const P = x.p /* Roll Rate --- rolling  moment is Lbar */
@@ -115,7 +119,6 @@ export default class F16Simulation {
     }
 
     this.atmosphericModel.update(vt, alt)
-
     this.engineModel.update(x.pow, alt, this.atmosphericModel.rmach, u.throttle)
 
     const T = this.engineModel.thrust
@@ -158,7 +161,10 @@ export default class F16Simulation {
 
     const [Cx, Cz, Cm, Cy, Cn, Cl] = hifi_C(alpha, beta, el)
     const [Cxq, Cyr, Cyp, Czq, Clr, Clp, Cmq, Cnr, Cnp] = hifi_damping(alpha)
-    const [delta_Cx_lef, delta_Cz_lef, delta_Cm_lef, delta_Cy_lef, delta_Cn_lef, delta_Cl_lef] = hifi_C_lef(alpha, beta)
+    const [delta_Cx_lef, delta_Cz_lef, delta_Cm_lef, delta_Cy_lef, delta_Cn_lef, delta_Cl_lef] = hifi_C_lef(
+      alpha_lef,
+      beta
+    )
     const [
       delta_Cxq_lef,
       delta_Cyr_lef,
@@ -169,10 +175,10 @@ export default class F16Simulation {
       delta_Cmq_lef,
       delta_Cnr_lef,
       delta_Cnp_lef,
-    ] = hifi_damping_lef(alpha)
+    ] = hifi_damping_lef(alpha_lef)
     const [delta_Cy_r30, delta_Cn_r30, delta_Cl_r30] = hifi_rudder(alpha, beta)
     const [delta_Cy_a20, delta_Cy_a20_lef, delta_Cn_a20, delta_Cn_a20_lef, delta_Cl_a20, delta_Cl_a20_lef] =
-      hifi_ailerons(alpha, beta)
+      hifi_ailerons(alpha, alpha_lef, beta)
 
     const [delta_Cnbeta, delta_Clbeta, delta_Cm, eta_el, delta_Cm_ds] = hifi_other_coeffs(alpha, el)
 
@@ -237,6 +243,10 @@ export default class F16Simulation {
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
     xd.vt = (U * Udot + V * Vdot + W * Wdot) / vt
+
+    if (isNaN(xd.vt)) {
+      console.log("isnan")
+    }
 
     /* %%%%%%%%%%%%%%%%%%
         alpha_dot equation
