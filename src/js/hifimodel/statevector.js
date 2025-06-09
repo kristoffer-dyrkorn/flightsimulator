@@ -1,4 +1,7 @@
+import * as THREE from "../graphics/three.module.js"
+
 import SimulationConstants from "./simulationconstants.js"
+
 /**
  * State vector for F16 simulator.
  */
@@ -12,6 +15,10 @@ export default class StateVector {
     this.theta = 0 // radians
     this.psi = 0 // radians
     this.vt = 0 // ft/sec
+    this.q0 = 0
+    this.q1 = 0
+    this.q2 = 0
+    this.q3 = 0
     this.alpha = 0 // radians
     this.beta = 0 // radians
     this.p = 0 // radians/sec
@@ -30,12 +37,20 @@ export default class StateVector {
 
     this.psi = startDirection * SimulationConstants.DTOR
 
+    const q = new THREE.Quaternion()
+
+    this.q0 = q.x
+    this.q1 = q.y
+    this.q2 = q.z
+    this.q3 = q.w
+
     this.vt = 506 // feet/sec, ~ km/t => 300 knots
     this.pow = 30 // % thrust
   }
 
   updateAircraftModel(f16) {
     f16.quaternion.identity()
+
     f16.rotateZ(-this.psi)
     f16.rotateY(this.phi)
     f16.rotateX(this.theta)
@@ -59,12 +74,21 @@ export default class StateVector {
     this.npos += dt * v.npos
     this.epos += dt * v.epos
     this.alt += dt * v.alt
+
     this.phi += dt * v.phi
     this.theta += dt * v.theta
     this.psi += dt * v.psi
+
+    this.q0 += dt * v.q0
+    this.q1 += dt * v.q1
+    this.q2 += dt * v.q2
+    this.q3 += dt * v.q3
+
     this.vt += dt * v.vt
+
     this.alpha += dt * v.alpha
     this.beta += dt * v.beta
+
     this.p += dt * v.p
     this.q += dt * v.q
     this.r += dt * v.r

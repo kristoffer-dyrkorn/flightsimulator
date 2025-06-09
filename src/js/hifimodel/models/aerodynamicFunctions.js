@@ -114,12 +114,24 @@ function _CXq(alpha) {
   return interpolate([HeaderTables.ALPHA1], DataTables.CX1120_ALPHA1_204, [alpha], [20])
 }
 
+export function _CXspbr(alpha) {
+  return interpolate([HeaderTables.ALPHA1], DataTables.CX_ALPHA1_SPBR, [alpha], [20])
+}
+
 function _CZq(alpha) {
   return interpolate([HeaderTables.ALPHA1], DataTables.CZ1120_ALPHA1_304, [alpha], [20])
 }
 
+export function _CZspbr(alpha) {
+  return interpolate([HeaderTables.ALPHA1], DataTables.CZ_ALPHA1_SPBR, [alpha], [20])
+}
+
 function _CMq(alpha) {
   return interpolate([HeaderTables.ALPHA1], DataTables.CM1120_ALPHA1_104, [alpha], [20])
+}
+
+export function _CMsbpr(alpha) {
+  return interpolate([HeaderTables.ALPHA1], DataTables.CM_ALPHA1_SPBR, [alpha], [20])
 }
 
 function _CYp(alpha) {

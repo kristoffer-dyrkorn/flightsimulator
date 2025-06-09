@@ -352,6 +352,12 @@ function keyboardHandler(keyboardEvent) {
     case ".": // external cam farer
       externalCameraPosition.distance += 10
       break
+    case "1": // speed brake -10 degrees
+      airplaneControlInput.speedbrake -= 10
+      break
+    case "2": // speed brake +10 degrees
+      airplaneControlInput.speedbrake += 10
+      break
     case " ":
       nextCamera()
       break

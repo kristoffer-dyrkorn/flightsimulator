@@ -10,6 +10,9 @@ import {
   hifi_damping_lef,
   hifi_rudder,
   hifi_other_coeffs,
+  _CXspbr,
+  _CZspbr,
+  _CMsbpr,
 } from "./models/aerodynamicFunctions.js"
 
 export default class F16Simulation {
@@ -24,34 +27,8 @@ export default class F16Simulation {
     return value
   }
 
-  // x = INTEGRATED state derivative
-  // xd = "normal" state, ie state derivatives
-
-  getAccelerations(x, xd) {
-    const g = SimulationConstants.G
-
-    const sina = Math.sin(x.alpha)
-    const cosa = Math.cos(x.alpha)
-    const sinb = Math.sin(x.beta)
-    const cosb = Math.cos(x.beta)
-
-    const vel_u = x.vt * cosb * cosa
-    const vel_v = x.vt * sinb
-    const vel_w = x.vt * cosb * sina
-
-    const u_dot = cosb * cosa * xd.vt - x.vt * sinb * cosa * xd.beta - x.vt * cosb * sina * xd.alpha
-    const v_dot = sinb * xd.vt + x.vt * cosb * xd.beta
-    const w_dot = cosb * sina * xd.vt - x.vt * sinb * sina * xd.beta + x.vt * cosb * cosa * xd.alpha
-
-    const nx_cg = (1.0 / g) * (u_dot + x.q * vel_w - x.r * vel_v) + Math.sin(x.theta)
-    const ny_cg = (1.0 / g) * (v_dot + x.r * vel_u - x.p * vel_w) - Math.cos(x.theta) * Math.sin(x.phi)
-    const nz_cg = (-1.0 / g) * (w_dot + x.p * vel_v - x.q * vel_u) + Math.cos(x.theta) * Math.cos(x.phi)
-
-    return [nx_cg, ny_cg, nz_cg]
-  }
-
   // using model at:
-  // https://github.com/johnviljoen/f16_mpc_oop_py/blob/master/Nguyen_m/trimfun.m#L84
+  // https://github.com/shield09/gjf16fcs/blob/master/trim_fun.m#L72
   // dLEF = 1.38*UX0(3)*180/pi - 9.05*qbar/ps + 1.45;
 
   setLef(alpha, qbar, ps) {
@@ -81,9 +58,15 @@ export default class F16Simulation {
     const npos = x.npos /* north position */
     const epos = x.epos /* east position */
     const alt = x.alt /* altitude */
+
     const phi = x.phi /* orientation angles in rad. */
     const theta = x.theta
     const psi = x.psi
+
+    const q0 = x.q0
+    const q1 = x.q1
+    const q2 = x.q2
+    const q3 = x.q3
 
     const vt = x.vt /* total velocity */
     let alpha = x.alpha * SimulationConstants.RTOD /* angle of attack in degrees */
@@ -125,6 +108,7 @@ export default class F16Simulation {
     const el = u.elevator
     const ail = u.aileron
     const rud = u.rudder
+    const spbr = u.speedbrake
 
     /* Leading edge flap setting in degrees */
     const lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
@@ -132,6 +116,7 @@ export default class F16Simulation {
     const dail = ail / SimulationConstants.AILERON_MAX
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */
     const dlef = 1 - lef / SimulationConstants.LEF_MAX /* leading edge flap normalized against max angle */
+    const dspbr = spbr / SimulationConstants.SPEEDBRAKE_MAX /* speed brake normalized against max angle */
 
     const U = vt * ca * cb /* directional velocities. */
     const V = vt * sb
@@ -182,20 +167,45 @@ export default class F16Simulation {
 
     const [delta_Cnbeta, delta_Clbeta, delta_Cm, eta_el, delta_Cm_ds] = hifi_other_coeffs(alpha, el)
 
+    // REF https://github.com/jreed1701/f16simulator/blob/master/source/jprsim.h#L293
+    //
+    // Alternatives
+    // https://github.com/marek-cel/mscsim/blob/master/data/fdm/f16/f16_fdm.xml#L184
+
+    // https://ntrs.nasa.gov/api/citations/19760017178/downloads/19760017178.pdf,
+    // PDF-page 34, ->
+    /*
+    SIMULATOR STUDY OF THE EFFECTIVENESS
+    OF AN AUTOMATIC CONTROL SYSTEM
+    DESIGNED TO IMPROVE THE HIGH-ANGLE-OF-ATTACK CHARACTERISTICS
+    OF A FIGHTER AIRPLANE 
+    */
+
+    const delta_Cx_spbr_alpha = 0 // _CXspbr(alpha)
+    const delta_Cz_spbr_alpha = 0 // _CZspbr(alpha)
+    const delta_Cm_spbr_alpha = 0 // _CMsbpr(alpha)
+
     /* XXXXXXXX Cx_tot XXXXXXXX */
 
     const dXdQ = (cbar / (2 * vt)) * (Cxq + delta_Cxq_lef * dlef)
-    const Cx_tot = Cx + delta_Cx_lef * dlef + dXdQ * Q
+    const Cx_tot = Cx + delta_Cx_lef * dlef + delta_Cx_spbr_alpha * dspbr + dXdQ * Q
 
     /* ZZZZZZZZ Cz_tot ZZZZZZZZ */
 
     const dZdQ = (cbar / (2 * vt)) * (Czq + delta_Cz_lef * dlef)
-    const Cz_tot = Cz + delta_Cz_lef * dlef + dZdQ * Q
+    const Cz_tot = Cz + delta_Cz_lef * dlef + delta_Cz_spbr_alpha * dspbr + dZdQ * Q
 
     /* MMMMMMMM Cm_tot MMMMMMMM */
 
     const dMdQ = (cbar / (2 * vt)) * (Cmq + delta_Cmq_lef * dlef)
-    const Cm_tot = Cm * eta_el + Cz_tot * (xcgr - xcg) + delta_Cm_lef * dlef + dMdQ * Q + delta_Cm + delta_Cm_ds
+    const Cm_tot =
+      Cm * eta_el +
+      Cz_tot * (xcgr - xcg) +
+      delta_Cm_lef * dlef +
+      delta_Cm_spbr_alpha * dspbr +
+      dMdQ * Q +
+      delta_Cm +
+      delta_Cm_ds
 
     /* YYYYYYYY Cy_tot YYYYYYYY */
 
@@ -234,19 +244,26 @@ export default class F16Simulation {
         compute Udot,Vdot, Wdot,(as on NASA report p36)
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
-    const Udot = R * V - Q * W - g * st + (this.atmosphericModel.qbar * S * Cx_tot) / m + T / m
-    const Vdot = P * W - R * U + g * ct * sphi + (this.atmosphericModel.qbar * S * Cy_tot) / m
-    const Wdot = Q * U - P * V + g * ct * cphi + (this.atmosphericModel.qbar * S * Cz_tot) / m
+    // total force in z direction
+    const Xbar = this.atmosphericModel.qbar * S * Cx_tot
+    const Ybar = this.atmosphericModel.qbar * S * Cy_tot
+    const Zbar = this.atmosphericModel.qbar * S * Cz_tot
+
+    const Udot = R * V - Q * W - g * st + (Xbar + T) / m
+    const Vdot = P * W - R * U + g * ct * sphi + Ybar / m
+    const Wdot = Q * U - P * V + g * ct * cphi + Zbar / m
+
+    /*
+    const Udot = R * V - Q * W + (Xbar + T) / m + 2 * (q1 * q3 - q0 * q2) * g
+    const Vdot = P * W - R * U + Ybar / m + 2 * (q2 * q3 + q0 * q1) * g
+    const Wdot = Q * U - P * V + Zbar / m + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * g
+    */
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         vt_dot equation (from S&L, p82)
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
     xd.vt = (U * Udot + V * Vdot + W * Wdot) / vt
-
-    if (isNaN(xd.vt)) {
-      console.log("isnan")
-    }
 
     /* %%%%%%%%%%%%%%%%%%
         alpha_dot equation
@@ -296,11 +313,29 @@ export default class F16Simulation {
       (Jx * N_tot + Jxz * L_tot + (Jx * (Jx - Jy) + Jxz * Jxz) * P * Q - Jxz * (Jx - Jy + Jz) * Q * R + Jx * Q * Heng) /
       denom
 
-    const [nx, ny, nz] = this.getAccelerations(x, xd)
+    // from https://github.com/shield09/gjf16fcs/blob/master/F16_dyn.c#L620
 
-    xd.nx = nx
-    xd.ny = ny
-    xd.nz = nz
+    xd.q0 = 0.5 * (-P * q1 - Q * q2 - R * q3)
+    xd.q1 = 0.5 * (P * q0 + R * q2 - Q * q3)
+    xd.q2 = 0.5 * (Q * q0 - R * q1 + P * q3)
+    xd.q3 = 0.5 * (R * q0 + Q * q1 - P * q2)
+
+    /* correction term from Moldy Users Manual by K. Refson */
+    const dq = q0 * xd.q0 + q1 * xd.q0 + q2 * xd.q0 + q3 * xd.q0
+
+    xd.q0 -= dq * q0
+    xd.q1 -= dq * q1
+    xd.q2 -= dq * q2
+    xd.q3 -= dq * q3
+
+    /*
+    xd.epos = (q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3) * U + 2 * (q1 * q2 - q0 * q3) * V + 2 * (q1 * q3 + q0 * q2) * W
+    xd.npos = 2 * (q1 * q2 + q0 * q3) * U + (q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3) * V + 2 * (q2 * q3 - q0 * q1) * W
+    xd.alt = 2 * (q1 * q3 - q0 * q2) * U + 2 * (q2 * q3 + q0 * q1) * V + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * W
+    */
+
+    // acceleration along z = pilot G
+    xd.nz = -Zbar / m / g
 
     return xd
   }

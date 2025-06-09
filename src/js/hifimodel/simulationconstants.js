@@ -27,8 +27,13 @@ SimulationConstants.RUDDER_MAX = 30
 SimulationConstants.AILERON_MIN = -21.5
 SimulationConstants.AILERON_MAX = 21.5
 
+SimulationConstants.AILERON_TRIM = -0.085
+
 SimulationConstants.LEF_MIN = 0
 SimulationConstants.LEF_MAX = 25
+
+SimulationConstants.SPEEDBRAKE_MIN = 0
+SimulationConstants.SPEEDBRAKE_MAX = 60
 
 SimulationConstants.PI = 3.14159
 SimulationConstants.RTOD = 180 / SimulationConstants.PI

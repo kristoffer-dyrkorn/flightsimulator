@@ -11,6 +11,7 @@ export default class InputVector {
 
     this.aileron = 0 // degrees
     this.rudder = 0 // degrees
+    this.speedbrake = 0 // degrees
     this.internalView = true
   }
 
@@ -20,13 +21,17 @@ export default class InputVector {
     this.elevator = this.limiter(this.elevator, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
     this.aileron = this.limiter(this.aileron, SimulationConstants.AILERON_MIN, SimulationConstants.AILERON_MAX)
     this.rudder = this.limiter(this.rudder, SimulationConstants.RUDDER_MIN, SimulationConstants.RUDDER_MAX)
+    this.speedbrake = this.limiter(
+      this.speedbrake,
+      SimulationConstants.SPEEDBRAKE_MIN,
+      SimulationConstants.SPEEDBRAKE_MAX
+    )
 
-    // center elevator around the trim value
+    // center elevator and aileron around the trim value
     this.elevator = (this.elevator - SimulationConstants.ELEVATOR_TRIM) * 0.98 + SimulationConstants.ELEVATOR_TRIM
+    this.aileron = (this.aileron - SimulationConstants.AILERON_TRIM) * 0.98 + SimulationConstants.AILERON_TRIM
 
     // auto-center rudders. in practice, this only applies to keyboard control
-    // since control inputs from gamepads are re-read every frame
-    this.aileron = this.aileron * 0.98
     this.rudder = this.rudder * 0.98
   }
 
