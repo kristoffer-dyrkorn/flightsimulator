@@ -3,9 +3,9 @@ import Terrain from "./terrain/terrain.js"
 import * as THREE from "./graphics/three.module.js"
 import { MTLLoader } from "./graphics/MTLLoader.js"
 import { OBJLoader } from "./graphics/OBJLoader.js"
-import StateVector from "./simulation/statevector.js"
-import InputVector from "./simulation/inputvector.js"
-import F16Simulation from "./simulation/f16simulation.js"
+import StateVector from "./hifimodel/statevector.js"
+import InputVector from "./hifimodel/inputvector.js"
+import F16Simulation from "./hifimodel/f16simulation.js"
 import ChaseObject from "./graphics/ChaseObject.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
@@ -180,7 +180,7 @@ function drawScene(currentFrametime) {
   airplaneControlInput.normalizeControls()
 
   const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
-  airplaneState.integrate(stateDerivative, frameTime * 0.001, false, 1)
+  airplaneState.integrate(stateDerivative, frameTime * 0.001)
   airplaneState.updateAircraftModel(f16)
 
   if (hudPlane.visible) {
@@ -351,6 +351,12 @@ function keyboardHandler(keyboardEvent) {
       break
     case ".": // external cam farer
       externalCameraPosition.distance += 10
+      break
+    case "1": // speed brake -10 degrees
+      airplaneControlInput.speedbrake -= 10
+      break
+    case "2": // speed brake +10 degrees
+      airplaneControlInput.speedbrake += 10
       break
     case " ":
       nextCamera()
