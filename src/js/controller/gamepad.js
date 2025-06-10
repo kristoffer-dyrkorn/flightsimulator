@@ -1,4 +1,4 @@
-import SimulationConstants from "../simulation/simulationconstants.js"
+import SimulationConstants from "../hifimodel/simulationconstants.js"
 
 export default class Gamepad {
   constructor() {
