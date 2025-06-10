@@ -32,6 +32,10 @@ Arrow keys control aileron and elevator. `z` and `x`: rudder. `q` and `a`: throt
 
 ## Release notes
 
+June 2025:
+
+- Improved flight dynamics, now incorporating the "high fidelity model" for the F-16, as described in [NASA-TN-D-8176](https://ntrs.nasa.gov/citations/19760017178).
+
 May 2025:
 
 - Implemented a simple HUD!
@@ -57,7 +61,13 @@ April 2021:
 - Terrain elevation data is provided by the [Norwegian Mapping Authority](https://www.kartverket.no) and is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Satellite photos are Copernicus Sentinel-2 data from 2022, provided and processed by the [Norwegian Mapping Authority](https://www.kartverket.no), licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
 - Orthophotos are from the [Norwegian Mapping Authority](https://www.kartverket.no), free for non-commercial use
-- Flight dynamics code is translated and rewritten from https://www.cds.caltech.edu/~murray/projects/afosr95-vehicles/models/f16/
+- Flight dynamics code is translated and rewritten from https://github.com/shield09/gjf16fcs/, with these sources:
+  -- "Nonlinear Adaptive Trajectory Control Applied to an F-16 Model", E.R. van Oort & L. Sonneveldt, 2009
+  -- "Nonlinear F-16 simulation using Simulink and Matlab", R. S. Russel, University of Minnesota, 2003
+  -- "Six-Degree of Freedom Nonlinear F-16 Aircraft Model", Ying Huo, University of Southern California, 2003
+  -- "Aircraft Control and Simulation" by Brian L. Stevens, Frank L. Lewis, John Wiley & Sons, Inc. 1992
+  -- "NASA Technical Paper 1538", Nguyen, L.T. et al., 1979
+  -- "NASA Technical Note D-8176", Gilbert at al, 1976
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
 - Node.js http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html
