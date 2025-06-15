@@ -94,7 +94,7 @@ export default class EngineModel {
   }
 
   engineThrust(powr, alti, rmach) {
-    const p = this.limit(powr, SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    const p = this.limit(powr, SimulationConstants.POWER_MIN, 100 * SimulationConstants.POWER_MAX)
     const a = this.limit(alti, SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
     const r = this.limit(rmach, SimulationConstants.MACH_MIN, SimulationConstants.MACH_MAX)
 
