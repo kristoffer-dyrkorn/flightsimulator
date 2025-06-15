@@ -96,24 +96,15 @@ export default class EngineModel {
   engineThrust(powr, alti, rmach) {
     const p = this.limit(powr, SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
     const a = this.limit(alti, SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
+    const r = this.limit(rmach, SimulationConstants.MACH_MIN, SimulationConstants.MACH_MAX)
 
     const h = 0.0001 * a
-    let i = this.fix(h)
-    if (i >= 5) {
-      i = 4
-    } else if (i <= 0) {
-      i = 0
-    }
+    const i = this.limit(Math.floor(h), 0, 4)
 
     const dh = h - i
-    const rm = 5.0 * rmach
+    const rm = 5.0 * r
 
-    let m = this.fix(rm)
-    if (m >= 5) {
-      m = 4
-    } else if (m <= 0) {
-      m = 0
-    }
+    const m = this.limit(Math.floor(rm), 0, 4)
 
     const dm = rm - m
     const cdh = 1.0 - dh
@@ -134,11 +125,6 @@ export default class EngineModel {
       const tmax = s + (t - s) * dm
       return tmil + (tmax - tmil) * (p - 50.0) * 0.02
     }
-  }
-
-  fix(ele) {
-    if (ele > 0.0) return Math.floor(ele)
-    else return Math.ceil(ele)
   }
 
   limit(value, min, max) {
