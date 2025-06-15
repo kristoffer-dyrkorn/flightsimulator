@@ -6,11 +6,11 @@ SimulationConstants.METERS_TO_FEET = 3.28084
 SimulationConstants.ALTITUDE_MIN = 0
 SimulationConstants.ALTITUDE_MAX = 50000
 
-SimulationConstants.MACH_MAX = 1.0
 SimulationConstants.MACH_MIN = 0.0
+SimulationConstants.MACH_MAX = 1.0
 
-SimulationConstants.POWER_MIN = 0
-SimulationConstants.POWER_MAX = 1
+SimulationConstants.POWER_MIN = 0.0
+SimulationConstants.POWER_MAX = 1.0
 
 SimulationConstants.ALPHA_MIN = -20
 SimulationConstants.ALPHA_MAX = 90
