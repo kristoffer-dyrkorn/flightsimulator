@@ -1,41 +1,33 @@
-import DataTable2D from "../math/datatable2D.js"
-import Interpolator from "../math/interpolator.js"
 import SimulationConstants from "../simulationconstants.js"
 
 export default class EngineModel {
   constructor() {
-    this.idlePowerData = new DataTable2D([
-      [1060, 670, 880, 1140, 1500, 1860],
-      [635, 425, 690, 1010, 1330, 1700],
-      [60, 25, 345, 755, 1130, 1525],
-      [-1020, -710, -300, 350, 910, 1360],
-      [-2700, -1900, -1300, -247, 600, 1100],
-      [-3600, -1400, -595, -342, -200, 700],
-    ])
-    this.idlePowerData.setXRange(SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
-    this.idlePowerData.setYRange(SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    this.idleData = [
+      [1060.0, 635.0, 60.0, -1020.0, -2700.0, -3600.0],
+      [670.0, 425.0, 25.0, -710.0, -1900.0, -1400.0],
+      [880.0, 690.0, 345.0, -300.0, -1300.0, -595.0],
+      [1140.0, 1010.0, 755.0, 350.0, -247.0, -342.0],
+      [1500.0, 1330.0, 1130.0, 910.0, 600.0, -200.0],
+      [1860.0, 1700.0, 1525.0, 1360.0, 1100.0, 700.0],
+    ]
 
-    this.milPowerData = new DataTable2D([
-      [12680, 9150, 6200, 3950, 2450, 1400],
-      [12680, 9150, 6313, 4040, 2470, 1400],
-      [12610, 9312, 6610, 4290, 2600, 1560],
-      [12640, 9839, 7090, 4660, 2840, 1660],
-      [12390, 10176, 7750, 5320, 3250, 1930],
-      [11680, 9848, 8050, 6100, 3800, 2310],
-    ])
-    this.milPowerData.setXRange(SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
-    this.milPowerData.setYRange(SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    this.milData = [
+      [12680.0, 12680.0, 12610.0, 12640.0, 12390.0, 11680.0],
+      [9150.0, 9150.0, 9312.0, 9839.0, 10176.0, 9848.0],
+      [6200.0, 6313.0, 6610.0, 7090.0, 7750.0, 8050.0],
+      [3950.0, 4040.0, 4290.0, 4660.0, 5320.0, 6100.0],
+      [2450.0, 2470.0, 2600.0, 2840.0, 3250.0, 3800.0],
+      [1400.0, 1400.0, 1560.0, 1660.0, 1930.0, 2310.0],
+    ]
 
-    this.maxPowerData = new DataTable2D([
-      [20000, 15000, 10800, 7000, 4000, 2500],
-      [21420, 15700, 11225, 7323, 4435, 2600],
-      [22700, 16860, 12250, 8154, 5000, 2835],
-      [24240, 18910, 13760, 9285, 5700, 3215],
-      [26070, 21075, 15975, 11115, 6860, 3950],
-      [28886, 23319, 18300, 13484, 8642, 5057],
-    ])
-    this.maxPowerData.setXRange(SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
-    this.maxPowerData.setYRange(SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    this.maxData = [
+      [20000.0, 21420.0, 22700.0, 24240.0, 26070.0, 28886.0],
+      [15000.0, 15700.0, 16860.0, 18910.0, 21075.0, 23319.0],
+      [10800.0, 11225.0, 12250.0, 13760.0, 15975.0, 18300.0],
+      [7000.0, 7323.0, 8154.0, 9285.0, 11115.0, 13484.0],
+      [4000.0, 4435.0, 5000.0, 5700.0, 6860.0, 8642.0],
+      [2500.0, 2600.0, 2835.0, 3215.0, 3950.0, 5057.0],
+    ]
 
     /**
      * thrust = engine thrust, lbf; dpow = time
@@ -57,36 +49,12 @@ export default class EngineModel {
   update(pow, alt, rmach, thtl) {
     // Compute engine thrust.
     this.thrust = this.engineThrust(pow, alt, rmach)
+
     // Compute commanded power level and power level time derivative.
     const cpow = this.tgear(thtl)
     this.dpow = this.pdot(pow, cpow)
   }
 
-  /**
-   * Computes the thrust for the F-16 model.
-   *
-   * @param pow   EngineModel power level, percent. ( 0 <= POW <= 100. )
-   * @param alt   Altitude, ft.                ( 0 <= ALT <= 50000. )
-   * @param rmach Mach number.                 ( 0 <= RMACH <= 1.0 )
-   */
-  engineThrust(pow, alt, rmach) {
-    const tmil = this.milPowerData.lookup(alt, rmach)
-    // Interpolate with idle or max thrust, depending on power level command.
-    if (pow < 50.0) {
-      const tidl = this.idlePowerData.lookup(alt, rmach)
-      return Interpolator.lerp(pow * 0.02, tidl, tmil)
-    } else {
-      const tmax = this.maxPowerData.lookup(alt, rmach)
-      return Interpolator.lerp((pow - 50.0) * 0.02, tmil, tmax)
-    }
-  }
-
-  /**
-   * Computes the engine power level command, POW, for an input
-   * throttle setting, THTL, for the F-16 engine model.
-   *
-   * @param thtl Throttle setting.  ( 0 <= THTL <= 1.0 )
-   */
   tgear(thtl) {
     if (thtl <= 0.77) {
       return 64.94 * thtl
@@ -95,14 +63,12 @@ export default class EngineModel {
     }
   }
 
-  /**
-   * Computes the rate of change in engine power level using a first
-   * order lag as a function of actual power, POW, and commanded
-   * power, CPOW, for the F-16 engine model.
-   *
-   * @param pow  EngineModel power level, percent.  ( 0 <= POW <= 100. )
-   * @param cpow Commanded engine power level, percent.  ( 0 <= CPOW <= 100. )
-   */
+  rtau(dp) {
+    if (dp <= 25.0) return 1.0
+    if (dp >= 50.0) return 0.1
+    return 1.9 - 0.036 * dp
+  }
+
   pdot(pow, cpow) {
     let tpow = 0
     let t = 0
@@ -127,15 +93,57 @@ export default class EngineModel {
     return t * (tpow - pow)
   }
 
-  /**
-   * Computes the thrust lag reciprocal time constant for the F-16
-   * engine model.
-   *
-   * @param dp Change in power level, percent  ( 0 <= DP <= 100. )
-   */
-  rtau(dp) {
-    if (dp <= 25.0) return 1.0
-    if (dp >= 50.0) return 0.1
-    return 1.9 - 0.036 * dp
+  engineThrust(powr, alti, rmach) {
+    const p = this.limit(powr, SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    const a = this.limit(alti, SimulationConstants.ALTITUDE_MIN, SimulationConstants.ALTITUDE_MAX)
+
+    const h = 0.0001 * a
+    let i = this.fix(h)
+    if (i >= 5) {
+      i = 4
+    } else if (i <= 0) {
+      i = 0
+    }
+
+    const dh = h - i
+    const rm = 5.0 * rmach
+
+    let m = this.fix(rm)
+    if (m >= 5) {
+      m = 4
+    } else if (m <= 0) {
+      m = 0
+    }
+
+    const dm = rm - m
+    const cdh = 1.0 - dh
+
+    let s = this.milData[i][m] * cdh + this.milData[i + 1][m] * dh
+    let t = this.milData[i][m + 1] * cdh + this.milData[i + 1][m + 1] * dh
+
+    const tmil = s + (t - s) * dm
+
+    if (p < 50.0) {
+      s = this.idleData[i][m] * cdh + this.idleData[i + 1][m] * dh
+      t = this.idleData[i][m + 1] * cdh + this.idleData[i + 1][m + 1] * dh
+      const tidl = s + (t - s) * dm
+      return tidl + (tmil - tidl) * p * 0.02
+    } else {
+      s = this.maxData[i][m] * cdh + this.maxData[i + 1][m] * dh
+      t = this.maxData[i][m + 1] * cdh + this.maxData[i + 1][m + 1] * dh
+      const tmax = s + (t - s) * dm
+      return tmil + (tmax - tmil) * (p - 50.0) * 0.02
+    }
+  }
+
+  fix(ele) {
+    if (ele > 0.0) return Math.floor(ele)
+    else return Math.ceil(ele)
+  }
+
+  limit(value, min, max) {
+    if (value < min) return min
+    if (value > max) return max
+    return value
   }
 }
