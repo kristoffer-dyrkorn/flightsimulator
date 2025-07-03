@@ -32,6 +32,11 @@ Arrow keys control aileron and elevator. `z` and `x`: rudder. `q` and `a`: throt
 
 ## Release notes
 
+July 2025:
+
+- Upgraded three.js. Switched data formats, now using GLB for meshes and KTX2 for textures.
+- Tests for ground collisions
+
 June 2025:
 
 - Improved flight dynamics, now incorporating the "high fidelity model" for the F-16, as described in [NASA-TN-D-8176](https://ntrs.nasa.gov/citations/19760017178).
@@ -69,7 +74,6 @@ April 2021:
   - "NASA Technical Paper 1538", Nguyen, L.T. et al., 1979
   - "NASA Technical Note D-8176", Gilbert at al, 1976
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
-- Node.js http server code is taken from https://adrianmejia.com/blog/2016/08/24/building-a-node-js-static-file-server-files-over-http-using-es6/
 - 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html
 - The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
 

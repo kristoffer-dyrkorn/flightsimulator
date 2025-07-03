@@ -1,5 +1,8 @@
 .DS_Store
+node_modules
+
 src/meshes/*
 src/texture-v2/*
-
+src/glbs
+src/texture
 

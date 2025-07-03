@@ -1,4 +1,4 @@
-import * as THREE from "./three.module.js"
+import { Vector3, Quaternion } from "three"
 
 export default class ChaseObject {
   constructor(target) {
@@ -12,8 +12,8 @@ export default class ChaseObject {
     this.accumulatedTime = 0
 
     // holder objects for return values, to avoid constant object allocation
-    this.position = new THREE.Vector3()
-    this.quaternion = new THREE.Quaternion()
+    this.position = new Vector3()
+    this.quaternion = new Quaternion()
   }
 
   addPoint(target) {

@@ -68,7 +68,7 @@ export default class F16Simulation {
     const q2 = x.q2
     const q3 = x.q3
 
-    const vt = x.vt /* total velocity */
+    let vt = x.vt /* total velocity */
     let alpha = x.alpha * SimulationConstants.RTOD /* angle of attack in degrees */
     let beta = x.beta * SimulationConstants.RTOD /* sideslip angle in degrees */
 

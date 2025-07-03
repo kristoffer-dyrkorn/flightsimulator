@@ -1,4 +1,4 @@
-import * as THREE from "./three.module.js"
+import { MathUtils } from "three"
 
 export default class HUDObject {
   constructor(canvas) {
@@ -19,7 +19,7 @@ export default class HUDObject {
   }
 
   update(airplaneState) {
-    this.heading = Math.round(THREE.MathUtils.RAD2DEG * airplaneState.psi)
+    this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi)
 
     // compensate for unknown offset in compass direction
     this.heading -= 8
@@ -93,7 +93,7 @@ export default class HUDObject {
     this.ctx.translate(this.width / 2, this.height / 2)
     this.ctx.rotate(-this.roll)
 
-    const pitch = this.pitch * THREE.MathUtils.RAD2DEG
+    const pitch = this.pitch * MathUtils.RAD2DEG
 
     this.ctx.beginPath()
 
@@ -159,7 +159,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = THREE.MathUtils.RAD2DEG * (-this.pitch + this.aoa) * 14
+    const offset = MathUtils.RAD2DEG * (-this.pitch + this.aoa) * 14
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
@@ -187,7 +187,7 @@ export default class HUDObject {
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
-    const aoaText = Math.round(this.aoa * THREE.MathUtils.RAD2DEG)
+    const aoaText = Math.round(this.aoa * MathUtils.RAD2DEG)
 
     this.ctx.fillText(`AOA ${aoaText}`, 30, 0.86 * this.height)
     this.ctx.fillText(`POW ${this.thrust}`, 30, 0.9 * this.height)

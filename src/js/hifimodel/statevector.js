@@ -1,4 +1,4 @@
-import * as THREE from "../graphics/three.module.js"
+import { Quaternion } from "three"
 
 import SimulationConstants from "./simulationconstants.js"
 
@@ -37,7 +37,7 @@ export default class StateVector {
 
     this.psi = startDirection * SimulationConstants.DTOR
 
-    const q = new THREE.Quaternion()
+    const q = new Quaternion()
 
     this.q0 = q.x
     this.q1 = q.y

@@ -1,12 +1,14 @@
-import * as THREE from "../graphics/three.module.js"
-import { BasisTextureLoader } from "../graphics/BasisTextureLoader.js"
+import { Vector3, Sphere, Mesh, BufferGeometry, MeshBasicMaterial, TextureLoader, MathUtils } from "three"
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
+import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js"
+import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
 
 const url = new URL(document.location)
 const urlParams = url.searchParams
 
-const TEXTURE_PATH = "texture-v2"
+const TEXTURE_PATH = "texture"
 
-const SERVER = urlParams.has("local") ? "http://localhost:8000" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
+const SERVER = urlParams.has("local") ? "" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
 export default class Tile {
   constructor(scene, terrain, tileExtents, lowerLeft) {
@@ -19,16 +21,16 @@ export default class Tile {
     this.tileName = `${lowerLeft.x}-${lowerLeft.y}`
 
     const sphereRadius = Math.sqrt(0.5 * tileExtents * tileExtents)
-    const tileCenter = new THREE.Vector3(lowerLeft.x + tileExtents / 2, lowerLeft.y + tileExtents / 2, 0)
-    this.boundingSphere = new THREE.Sphere(tileCenter, sphereRadius)
+    const tileCenter = new Vector3(lowerLeft.x + tileExtents / 2, lowerLeft.y + tileExtents / 2, 0)
+    this.boundingSphere = new Sphere(tileCenter, sphereRadius)
 
-    this.tileMesh = new THREE.Mesh()
+    this.tileMesh = new Mesh()
     this.tileMesh.position.set(lowerLeft.x, lowerLeft.y, 0)
     this.tileMesh.updateMatrixWorld()
 
-    this.tileMesh.geometry = new THREE.BufferGeometry()
+    this.tileMesh.geometry = new BufferGeometry()
     // use a very simple material, all light and shading of terrain is baked into the texture
-    this.tileMesh.material = new THREE.MeshBasicMaterial()
+    this.tileMesh.material = new MeshBasicMaterial()
   }
 
   update(camera, showWireFrame) {
@@ -77,17 +79,19 @@ export default class Tile {
   }
 
   load() {
-    fetch(`${SERVER}/meshes/${this.tileName}.msh`, { mode: "cors" }).then((response) => {
-      response.arrayBuffer().then((buffer) => {
-        const [posAttribute, uvAttribute, indexAttribute] = this.getVertexData(buffer)
-        this.tileMesh.geometry.setAttribute("position", posAttribute)
-        this.tileMesh.geometry.setAttribute("uv", uvAttribute)
-        this.tileMesh.geometry.index = indexAttribute
+    Tile.gltfLoader.load(
+      `${SERVER}/glbs/${this.tileName}.glb`,
+      (gltf) => {
+        this.tileMesh.geometry = gltf.scene.children[0].geometry
+        this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
 
-        Tile.basisLoader.load(
-          `${SERVER}/${TEXTURE_PATH}/${this.tileName}.basis`,
+        Tile.bvhWorker.generate(this.tileMesh.geometry).then((bvh) => {
+          this.tileMesh.geometry.boundsTree = bvh
+        })
+
+        Tile.ktx2Loader.load(
+          `${SERVER}/${TEXTURE_PATH}/${this.tileName}.ktx2`,
           (texture) => {
-            texture.encoding = THREE.sRGBEncoding
             texture.anisotropy = 4
 
             this.tileMesh.material.map = texture
@@ -105,37 +109,19 @@ export default class Tile {
             console.log("Error: " + error)
           }
         )
-      })
-    })
-  }
-
-  getVertexData(buffer) {
-    let offset = 0
-    const stride = Uint16Array.BYTES_PER_ELEMENT
-
-    const vertexCount = new Uint16Array(buffer, offset, 1)[0]
-    offset += stride * 1 // read 1 uint16
-
-    const vertices = new Uint16Array(buffer, offset, 3 * vertexCount)
-    offset += stride * 3 * vertexCount // 1 vertex = 3 coordinates
-
-    const uvs = new Uint16Array(buffer, offset, 2 * vertexCount)
-    offset += stride * 2 * vertexCount // 1 vertex = 2 texture coordinates
-
-    const triangleCount = new Uint16Array(buffer, offset, 1)[0]
-    offset += stride * 1 // read 1 uint16
-
-    const triangles = new Uint16Array(buffer, offset, 3 * triangleCount) // 1 triangle = 3 indices
-
-    const posAttribute = new THREE.BufferAttribute(vertices, 3)
-    const uvAttribute = new THREE.BufferAttribute(uvs, 2, true) // uv coordinates must be normalized, ie scaled to 0..1
-    const indexAttribute = new THREE.BufferAttribute(triangles, 1)
-
-    return [posAttribute, uvAttribute, indexAttribute]
+      },
+      () => {},
+      (error) => {
+        console.log("Error:", error)
+      }
+    )
   }
 }
 
 Tile.loadCount = 0
-Tile.basisLoader = new BasisTextureLoader()
-Tile.basisLoader.setTranscoderPath("js/graphics/basis/")
-Tile.basisLoader.setCrossOrigin("anonymous")
+
+Tile.ktx2Loader = new KTX2Loader()
+Tile.ktx2Loader.setTranscoderPath("js/externals/basis/")
+Tile.ktx2Loader.setCrossOrigin("anonymous")
+
+Tile.gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)
