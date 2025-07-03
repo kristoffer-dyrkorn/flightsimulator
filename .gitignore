@@ -1,8 +1,8 @@
 .DS_Store
 node_modules
+package-lock.json
 
-src/meshes/*
-src/texture-v2/*
+dist
 src/glbs
-src/texture
+src/textures
 

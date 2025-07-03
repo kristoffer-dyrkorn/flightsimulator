@@ -28,6 +28,7 @@ import ChaseObject from "./graphics/ChaseObject.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
+import proj4 from "proj4"
 
 // terrain boundaries, in UTM33 coordinates
 const MINX = -100000
