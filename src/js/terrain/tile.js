@@ -6,8 +6,6 @@ import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
 const url = new URL(document.location)
 const urlParams = url.searchParams
 
-const TEXTURE_PATH = "texture"
-
 const SERVER = urlParams.has("local") ? "" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
 export default class Tile {
@@ -90,7 +88,7 @@ export default class Tile {
         })
 
         Tile.ktx2Loader.load(
-          `${SERVER}/${TEXTURE_PATH}/${this.tileName}.ktx2`,
+          `${SERVER}/textures/${this.tileName}.ktx2`,
           (texture) => {
             texture.anisotropy = 4
 
