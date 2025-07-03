@@ -56,25 +56,23 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 const hudCanvas = document.getElementById("hud")
 const hud = new HUDObject(hudCanvas)
 
+// NOTE this makes all objects STATIC
+// i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
 Object3D.matrixWorldAutoUpdate = false
 Object3D.matrixAutoUpdate = false
 
 const scene = new Scene()
 
-// NOTE this makes all objects STATIC
-// i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
-// scene.autoUpdate = false
-
-scene.background = new Color(0.74, 0.74, 0.82)
+scene.background = new Color(0.74, 0.74, 0.82).convertSRGBToLinear()
 scene.fog = new FogExp2(scene.background, 0.000042)
 
 // add lights to the scene, to propely display the f16 model
-const directionalLight = new DirectionalLight(0xcdb5ae, 0.5)
+const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
 directionalLight.position.set(0, -0.2, 0.8)
 directionalLight.updateMatrixWorld()
 scene.add(directionalLight)
 
-const ambientLight = new AmbientLight(0xc7d4ed, 0.05)
+const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
 scene.add(ambientLight)
 
 // initialize cameras
