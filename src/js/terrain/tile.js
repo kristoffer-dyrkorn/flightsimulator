@@ -71,6 +71,9 @@ export default class Tile {
       this.tileMesh.material.dispose()
       this.tileMesh.geometry.dispose()
 
+      // free bvh memory
+      this.tileMesh.geometry.boundsTree = null
+
       this.loaded = false
       Tile.loadCount--
     }

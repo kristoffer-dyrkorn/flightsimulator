@@ -185,25 +185,28 @@ setInterval(() => {
   const tileYOffset = (camera.position.y - MINY) % TILE_EXTENTS
   const y = Math.round(camera.position.y - tileYOffset)
 
+  // get the tile
   const tile = terrain.tiles.get(`${x}-${y}`)
   if (tile.loaded) {
     const cameraElevation = camera.position.z * SimulationConstants.FEET_TO_METERS
     const tileGeometry = tile.tileMesh.geometry
 
-    // in the GLB geometry, y is up
+    // in the GLB, y is up, so read max y to get max elevation
     const maxElevationInTile = tileGeometry.boundingBox.max.y
 
     // optimization: only do ray casting if we are below the max elevation for the tile
     if (cameraElevation < maxElevationInTile) {
-      // update ray origin with the camera position
-      // use local coordinates for the tile (y is up)
+      // set ray origin to the camera position
+      // use relative coordinates inside the tile to match the geometry's coordinates
+      // and convert from z up to y up
       interSectionRay.origin.set(tileXOffset, camera.position.z, -tileYOffset)
 
+      // cast a ray from the camera position and straight down towards the terrain
       const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
 
-      // if there is no hit we are below the terrain
+      // if there was no hit we were below the terrain
       if (!hit) {
-        console.log("Collision")
+        document.location.href = "collision.html"
       }
     }
   }
