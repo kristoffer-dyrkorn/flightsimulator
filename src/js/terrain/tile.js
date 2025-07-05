@@ -24,6 +24,7 @@ export default class Tile {
 
     this.tileMesh = new Mesh()
     this.tileMesh.position.set(lowerLeft.x, lowerLeft.y, 0)
+    this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
     this.tileMesh.updateMatrixWorld()
 
     this.tileMesh.geometry = new BufferGeometry()
@@ -84,7 +85,6 @@ export default class Tile {
       `${SERVER}/glb50/${this.tileName}.glb`,
       (gltf) => {
         this.tileMesh.geometry = gltf.scene.children[0].geometry
-        this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
 
         console.log(`${this.tileName}.glb loaded, ${this.tileMesh.geometry.index.array.length / 3} triangles`)
 
