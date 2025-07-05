@@ -81,10 +81,12 @@ export default class Tile {
 
   load() {
     Tile.gltfLoader.load(
-      `${SERVER}/glbs/${this.tileName}.glb`,
+      `${SERVER}/glb50/${this.tileName}.glb`,
       (gltf) => {
         this.tileMesh.geometry = gltf.scene.children[0].geometry
         this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
+
+        console.log(`${this.tileName}.glb loaded, ${this.tileMesh.geometry.index.array.length / 3} triangles`)
 
         Tile.bvhWorker.generate(this.tileMesh.geometry).then((bvh) => {
           this.tileMesh.geometry.boundsTree = bvh
@@ -93,7 +95,9 @@ export default class Tile {
         Tile.ktx2Loader.load(
           `${SERVER}/textures/${this.tileName}.ktx2`,
           (texture) => {
-            texture.anisotropy = 4
+            console.log(`${this.tileName}.ktx2 loaded`)
+
+            texture.anisotropy = 16
 
             this.tileMesh.material.map = texture
             this.tileMesh.material.needsUpdate = true
@@ -107,13 +111,13 @@ export default class Tile {
           },
           () => {},
           (error) => {
-            console.log("Error: " + error)
+            console.log(`Texture error loading ${this.tileName}.ktx2:`, error)
           }
         )
       },
       () => {},
       (error) => {
-        console.log("Error:", error)
+        console.log(`GLB Error loading ${this.tileName}.glb:`, error)
       }
     )
   }

@@ -3,6 +3,6 @@ node_modules
 package-lock.json
 
 dist
-src/glbs
+src/glb50
 src/textures
 
