@@ -41,6 +41,19 @@ const TILE_EXTENTS = 50 * 255
 let showWireFrame = false
 let previousFrameTime = 0
 
+// The flight model is integrated with forward Euler, which goes unstable if the
+// step gets too large - a step of 0.25 s is enough to send the state to NaN. So
+// it runs at a fixed step, decoupled from the frame rate, and long frames are
+// covered by taking several steps. MAX_PHYSICS_STEPS caps the work a single
+// frame can trigger, so a browser stall (tab switch, GC pause, terrain load)
+// cannot cascade into an ever-growing backlog of steps. A step costs ~40 us, so
+// the cap can be generous - 30 steps keeps real time down to 4 fps for around
+// 1 ms of work, which is nowhere near being the reason a frame is slow.
+const PHYSICS_STEP = 1 / 120 // seconds
+const MAX_PHYSICS_STEPS = 30
+
+let physicsTimeDebt = 0
+
 let currentCamera = 0
 
 let gamepad = null
@@ -241,8 +254,22 @@ function drawScene(currentFrametime) {
 
   airplaneControlInput.normalizeControls()
 
-  const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
-  airplaneState.integrate(stateDerivative, frameTime * 0.001)
+  physicsTimeDebt += frameTime * 0.001
+
+  let steps = 0
+  while (physicsTimeDebt >= PHYSICS_STEP && steps < MAX_PHYSICS_STEPS) {
+    const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
+    airplaneState.integrate(stateDerivative, PHYSICS_STEP)
+    physicsTimeDebt -= PHYSICS_STEP
+    steps++
+  }
+
+  // drop whatever is left over after a stall rather than trying to catch up -
+  // the simulation briefly runs slow, which is far better than exploding
+  if (steps === MAX_PHYSICS_STEPS) {
+    physicsTimeDebt = 0
+  }
+
   airplaneState.updateAircraftModel(f16)
 
   if (hudPlane.visible) {

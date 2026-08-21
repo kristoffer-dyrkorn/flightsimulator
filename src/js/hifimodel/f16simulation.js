@@ -59,10 +59,9 @@ export default class F16Simulation {
     const epos = x.epos /* east position */
     const alt = x.alt /* altitude */
 
-    const phi = x.phi /* orientation angles in rad. */
-    const theta = x.theta
-    const psi = x.psi
-
+    /* attitude quaternion, q0 = scalar part. this is the primary attitude state -
+       the euler angles in the state vector are derived from it after integration,
+       and are only used for display. */
     const q0 = x.q0
     const q1 = x.q1
     const q2 = x.q2
@@ -89,13 +88,19 @@ export default class F16Simulation {
     const cb = Math.cos(x.beta) /* cos(beta)  */
     const tb = Math.tan(x.beta) /* tan(beta)  */
 
-    const st = Math.sin(theta)
-    const ct = Math.cos(theta)
-    const tt = Math.tan(theta)
-    const sphi = Math.sin(phi)
-    const cphi = Math.cos(phi)
-    const spsi = Math.sin(psi)
-    const cpsi = Math.cos(psi)
+    /* body -> earth (north/east/down) rotation matrix, built from the attitude
+       quaternion. rows are north, east, down; columns are body x, y, z.
+       using this instead of the euler angles avoids the 1/cos(theta) and
+       tan(theta) singularities that blow up when the aircraft goes vertical. */
+    const r00 = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
+    const r01 = 2 * (q1 * q2 - q0 * q3)
+    const r02 = 2 * (q1 * q3 + q0 * q2)
+    const r10 = 2 * (q1 * q2 + q0 * q3)
+    const r11 = q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3
+    const r12 = 2 * (q2 * q3 - q0 * q1)
+    const r20 = 2 * (q1 * q3 - q0 * q2) /* = -sin(theta) */
+    const r21 = 2 * (q2 * q3 + q0 * q1) /* =  sin(phi)cos(theta) */
+    const r22 = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3 /* =  cos(phi)cos(theta) */
 
     if (vt <= 0.01) {
       vt = 0.01
@@ -127,28 +132,22 @@ export default class F16Simulation {
     xd.pow = this.engineModel.dpow
 
     /* nposdot */
-    xd.npos = U * (ct * cpsi) + V * (sphi * cpsi * st - cphi * spsi) + W * (cphi * st * cpsi + sphi * spsi)
+    xd.npos = r00 * U + r01 * V + r02 * W
 
     /* eposdot */
-    xd.epos = U * (ct * spsi) + V * (sphi * spsi * st + cphi * cpsi) + W * (cphi * st * spsi - sphi * cpsi)
+    xd.epos = r10 * U + r11 * V + r12 * W
 
-    /* altdot */
-    xd.alt = U * st - V * (sphi * ct) - W * (cphi * ct)
+    /* altdot - altitude is up, the matrix row is down, hence the sign flip */
+    xd.alt = -(r20 * U + r21 * V + r22 * W)
 
-    /* phidot */
-    xd.phi = P + tt * (Q * sphi + R * cphi)
-
-    /* theta dot */
-    xd.theta = Q * cphi - R * sphi
-
-    /* psidot */
-    xd.psi = (Q * sphi + R * cphi) / ct
+    /* attitude is propagated as a quaternion further down. the euler angles are
+       not integrated - StateVector.integrate() derives them from the quaternion. */
 
     const [Cx, Cz, Cm, Cy, Cn, Cl] = hifi_C(alpha, beta, el)
     const [Cxq, Cyr, Cyp, Czq, Clr, Clp, Cmq, Cnr, Cnp] = hifi_damping(alpha)
     const [delta_Cx_lef, delta_Cz_lef, delta_Cm_lef, delta_Cy_lef, delta_Cn_lef, delta_Cl_lef] = hifi_C_lef(
       alpha_lef,
-      beta
+      beta,
     )
     const [
       delta_Cxq_lef,
@@ -249,15 +248,12 @@ export default class F16Simulation {
     const Ybar = this.atmosphericModel.qbar * S * Cy_tot
     const Zbar = this.atmosphericModel.qbar * S * Cz_tot
 
-    const Udot = R * V - Q * W - g * st + (Xbar + T) / m
-    const Vdot = P * W - R * U + g * ct * sphi + Ybar / m
-    const Wdot = Q * U - P * V + g * ct * cphi + Zbar / m
-
-    /*
-    const Udot = R * V - Q * W + (Xbar + T) / m + 2 * (q1 * q3 - q0 * q2) * g
-    const Vdot = P * W - R * U + Ybar / m + 2 * (q2 * q3 + q0 * q1) * g
-    const Wdot = Q * U - P * V + Zbar / m + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * g
-    */
+    /* gravity resolved into body axes is g times the "down" row of the
+       body -> earth matrix, ie (r20, r21, r22). in euler terms that row is
+       (-sin(theta), sin(phi)cos(theta), cos(phi)cos(theta)). */
+    const Udot = R * V - Q * W + g * r20 + (Xbar + T) / m
+    const Vdot = P * W - R * U + g * r21 + Ybar / m
+    const Wdot = Q * U - P * V + g * r22 + Zbar / m
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         vt_dot equation (from S&L, p82)
@@ -320,19 +316,16 @@ export default class F16Simulation {
     xd.q2 = 0.5 * (Q * q0 - R * q1 + P * q3)
     xd.q3 = 0.5 * (R * q0 + Q * q1 - P * q2)
 
-    /* correction term from Moldy Users Manual by K. Refson */
-    const dq = q0 * xd.q0 + q1 * xd.q0 + q2 * xd.q0 + q3 * xd.q0
+    /* correction term from the Moldy Users Manual by K. Refson. it projects out
+       the component of qdot lying along q, which keeps |q|
+       from drifting away from 1. q.qdot is analytically zero for a unit
+       quaternion, so it only removes accumulated numerical error. */
+    const dq = q0 * xd.q0 + q1 * xd.q1 + q2 * xd.q2 + q3 * xd.q3
 
     xd.q0 -= dq * q0
     xd.q1 -= dq * q1
     xd.q2 -= dq * q2
     xd.q3 -= dq * q3
-
-    /*
-    xd.epos = (q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3) * U + 2 * (q1 * q2 - q0 * q3) * V + 2 * (q1 * q3 + q0 * q2) * W
-    xd.npos = 2 * (q1 * q2 + q0 * q3) * U + (q0 * q0 - q1 * q1 + q2 * q2 - q3 * q3) * V + 2 * (q2 * q3 - q0 * q1) * W
-    xd.alt = 2 * (q1 * q3 - q0 * q2) * U + 2 * (q2 * q3 + q0 * q1) * V + (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * W
-    */
 
     // acceleration along z = pilot G
     xd.nz = -Zbar / m / g

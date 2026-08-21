@@ -12,7 +12,7 @@ export default class HUDObject {
 
     this.ctx = this.canvas.getContext("2d")
     this.ctx.lineWidth = 1.7
-    this.ctx.font = "1.5em Monaco"
+    this.ctx.font = "1.5em Tahoma"
     this.ctx.textBaseline = "middle"
     this.ctx.fillStyle = "#20ff40"
     this.ctx.strokeStyle = "#20ff40"
