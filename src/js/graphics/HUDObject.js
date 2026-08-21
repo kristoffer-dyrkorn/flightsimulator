@@ -18,19 +18,17 @@ export default class HUDObject {
     this.ctx.strokeStyle = "#20ff40"
   }
 
-  update(airplaneState) {
-    this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi)
+  /**
+   * @param airplaneState  current state of the aircraft
+   * @param compassOffset  grid convergence at the aircraft's position, degrees.
+   *                       psi is measured against grid north, so this converts
+   *                       it to a true heading.
+   */
+  update(airplaneState, compassOffset) {
+    this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi + compassOffset)
 
-    // compensate for unknown offset in compass direction
-    this.heading -= 8
-
-    while (this.heading < 0) {
-      this.heading += 360
-    }
-
-    if (this.heading > 359) {
-      this.heading -= 360
-    }
+    // wrap into 0..359
+    this.heading = ((this.heading % 360) + 360) % 360
 
     this.speed = Math.round(0.592484 * airplaneState.vt)
     this.altitude = Math.round(airplaneState.alt)
@@ -159,7 +157,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = MathUtils.RAD2DEG * (-this.pitch + this.aoa) * 14
+    const offset = MathUtils.RAD2DEG * this.aoa * 28
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)

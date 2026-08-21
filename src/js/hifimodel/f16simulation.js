@@ -180,9 +180,13 @@ export default class F16Simulation {
     OF A FIGHTER AIRPLANE 
     */
 
-    const delta_Cx_spbr_alpha = 0 // _CXspbr(alpha)
-    const delta_Cz_spbr_alpha = 0 // _CZspbr(alpha)
-    const delta_Cm_spbr_alpha = 0 // _CMsbpr(alpha)
+    /* Speedbrake increments, for full 60 degree deflection - scaled by dspbr
+       below. The speedbrake is a drag increment of CD = 0.05 along the wind
+       axis, so in body axes Cx and Cz are just its cos/sin resolution and there
+       is no pitching moment. See CX_ALPHA1_SPBR in dataTables.js. */
+    const delta_Cx_spbr_alpha = _CXspbr(alpha)
+    const delta_Cz_spbr_alpha = _CZspbr(alpha)
+    const delta_Cm_spbr_alpha = _CMsbpr(alpha)
 
     /* XXXXXXXX Cx_tot XXXXXXXX */
 
@@ -191,7 +195,7 @@ export default class F16Simulation {
 
     /* ZZZZZZZZ Cz_tot ZZZZZZZZ */
 
-    const dZdQ = (cbar / (2 * vt)) * (Czq + delta_Cz_lef * dlef)
+    const dZdQ = (cbar / (2 * vt)) * (Czq + delta_Czq_lef * dlef)
     const Cz_tot = Cz + delta_Cz_lef * dlef + delta_Cz_spbr_alpha * dspbr + dZdQ * Q
 
     /* MMMMMMMM Cm_tot MMMMMMMM */
@@ -327,7 +331,11 @@ export default class F16Simulation {
     xd.q2 -= dq * q2
     xd.q3 -= dq * q3
 
-    // acceleration along z = pilot G
+    /* load factors - the specific non-gravitational force along each body axis,
+       in g. this is what an accelerometer at the cg reads, so thrust counts but
+       gravity does not. nz is positive up, hence the sign flip: pilot G. */
+    xd.nx = (Xbar + T) / m / g
+    xd.ny = Ybar / m / g
     xd.nz = -Zbar / m / g
 
     return xd

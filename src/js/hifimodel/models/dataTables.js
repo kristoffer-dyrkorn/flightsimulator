@@ -204,10 +204,10 @@ export const CL1620_ALPHA2_607 = [
 ]
 export const CL9999_ALPHA1_brett = [0, 0, 0, 0, 0, 0, 0, 0.0007, 0.0005, 0.0003, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
-export const CM_ALPHA1_SPBR = [
-  -0.0034, -0.0034, -0.0034, -0.0034, -0.0034, 0.0289, 0.0215, 0.0122, 0.0241, 0.0263, -0.0163, -0.0428, -0.0704,
-  -0.0844, -0.0789, -0.0603, -0.045, -0.0578, -0.0107, -0.0107,
-]
+// Speedbrake increment, pitching moment. NASA-TN-D-8176 models the speedbrake
+// as a pure drag force through the cg, so it contributes no pitching moment.
+// See CX_ALPHA1_SPBR for the full story.
+export const CM_ALPHA1_SPBR = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
 export const CM0120_ALPHA1_BETA1_DH1_101 = [
   0.2059, 0.1698, 0.1426, 0.162, 0.153, 0.147, 0.15, 0.167, 0.151, 0.12, 0.108, 0.082, 0.113, 0.093, -0.015, 0.019,
@@ -603,10 +603,23 @@ export const CN1620_ALPHA2_507 = [
 ]
 export const CN9999_ALPHA1_brett = [0, 0, 0, 0, 0, 0, 0, 0, 0, -0.0008, 0.001, 0, 0, 0, 0, 0, 0, 0, 0, 0]
 
+// Speedbrake increments, at full 60 degree deflection, on the ALPHA1 grid.
+// Source: NASA-TN-D-8176 via
 // https://github.com/marek-cel/mscsim/blob/master/data/fdm/f16/f16_fdm.xml#L184
+// (delta_cx_sb) and #L638 (delta_cz_sb).
+//
+// The speedbrake is modelled as a pure drag increment of CD = 0.05, acting
+// along the wind axis, resolved into body axes:
+//
+//   delta_Cx = -0.05 * cos(alpha)
+//   delta_Cz = -0.05 * sin(alpha)
+//
+// which is what these two tables are - the source values match that formula to
+// within its 4-decimal rounding at all 18 of its alpha points. The tables here
+// are the formula evaluated on ALPHA1, which extends it to alpha = -20 and -15.
 export const CX_ALPHA1_SPBR = [
-  -0.0101, -0.0101, -0.0101, -0.0101, -0.0101, -0.0358, -0.079, -0.1227, -0.1827, -0.1892, -0.1988, -0.2, -0.1874,
-  -0.1673, -0.1476, -0.131, -0.1279, -0.1325, -0.125, -0.125,
+  -0.04698, -0.0483, -0.04924, -0.04981, -0.05, -0.04981, -0.04924, -0.0483, -0.04698, -0.04532, -0.0433, -0.04096,
+  -0.0383, -0.03536, -0.03214, -0.02868, -0.025, -0.0171, -0.00868, 0,
 ]
 
 export const CX0120_ALPHA1_BETA1_DH1_201 = [
@@ -921,9 +934,10 @@ export const CY1620_ALPHA2_407 = [
   -0.558, -0.558, -0.558, -0.198, -0.107, 0.027, -0.085, -0.046, 0.331, 0.215, 0.43, -0.06, -0.374, -0.187,
 ]
 
+// Speedbrake increment, normal force. = -0.05 * sin(alpha). See CX_ALPHA1_SPBR.
 export const CZ_ALPHA1_SPBR = [
-  -0.3858, -0.3858, -0.3858, -0.3858, -0.3858, -0.2685, -0.3021, -0.4248, -0.2094, -0.0969, 0.0438, 0.0947, 0.0014,
-  -0.0097, -0.0153, -0.052, -0.001, -0.0202, -0.0369, -0.0369,
+  0.0171, 0.01294, 0.00868, 0.00436, 0, -0.00436, -0.00868, -0.01294, -0.0171, -0.02113, -0.025, -0.02868, -0.03214,
+  -0.03536, -0.0383, -0.04096, -0.0433, -0.04698, -0.04924, -0.05,
 ]
 
 export const CZ0120_ALPHA1_BETA1_DH1_301 = [

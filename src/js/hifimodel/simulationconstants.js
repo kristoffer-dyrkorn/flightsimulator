@@ -9,8 +9,13 @@ SimulationConstants.ALTITUDE_MAX = 50000
 SimulationConstants.MACH_MIN = 0.0
 SimulationConstants.MACH_MAX = 1.0
 
+// throttle setting, fraction
 SimulationConstants.POWER_MIN = 0.0
 SimulationConstants.POWER_MAX = 1.0
+
+// engine power state, percent
+SimulationConstants.POWER_LEVEL_MIN = 0.0
+SimulationConstants.POWER_LEVEL_MAX = 100.0
 
 SimulationConstants.ALPHA_MIN = -20
 SimulationConstants.ALPHA_MAX = 90
@@ -38,14 +43,12 @@ SimulationConstants.LEF_MAX = 25
 SimulationConstants.SPEEDBRAKE_MIN = 0
 SimulationConstants.SPEEDBRAKE_MAX = 60
 
-SimulationConstants.PI = 3.14159
-SimulationConstants.RTOD = 180 / SimulationConstants.PI
-SimulationConstants.DTOR = SimulationConstants.PI / 180
+SimulationConstants.RTOD = 180 / Math.PI
+SimulationConstants.DTOR = Math.PI / 180
 
 SimulationConstants.B = 30.0
 SimulationConstants.CBAR = 11.32
 SimulationConstants.G = 32.174 // gravitational constant, ft/sec^2
-SimulationConstants.HE = 160.0
 SimulationConstants.S = 300.0
 SimulationConstants.XCGR = 0.35 // reference center of gravity along x axis
 SimulationConstants.XCG = 0.3 // center of gravity along x axis

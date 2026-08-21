@@ -36,6 +36,12 @@ const MAXX = 1137000
 const MINY = 6400000
 const MAXY = 7970000
 
+const UTM33N_PROJECTION = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
+
+// all terrain is projected in UTM zone 33, so the central meridian is always
+// 15E no matter where the aircraft happens to be
+const UTM33N_CENTRAL_MERIDIAN = 15
+
 const TILE_EXTENTS = 50 * 255
 
 let showWireFrame = false
@@ -146,8 +152,10 @@ let startDirection = +urlParams.get("c") || 0
 
 camera.position.set(startPoint[0], startPoint[1], startPoint[2])
 
-// compensate for unknown offset in compass direction
-startDirection += 8
+// the "c" parameter is a true heading, but the flight model measures heading
+// against grid north, so take out the grid convergence at the start position.
+// startPoint[3] is getCompassOffset() evaluated there.
+startDirection -= startPoint[3]
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 
@@ -252,7 +260,7 @@ function drawScene(currentFrametime) {
     gamepad.read(airplaneControlInput)
   }
 
-  airplaneControlInput.normalizeControls()
+  airplaneControlInput.normalizeControls(frameTime * 0.001)
 
   physicsTimeDebt += frameTime * 0.001
 
@@ -273,7 +281,14 @@ function drawScene(currentFrametime) {
   airplaneState.updateAircraftModel(f16)
 
   if (hudPlane.visible) {
-    hud.update(airplaneState)
+    // grid convergence varies across the map, so evaluate it where the aircraft
+    // is now rather than reusing the value from the start position
+    const compassOffset = getCompassOffset(
+      airplaneState.epos * SimulationConstants.FEET_TO_METERS,
+      airplaneState.npos * SimulationConstants.FEET_TO_METERS
+    )
+
+    hud.update(airplaneState, compassOffset)
     hud.draw()
     hudTexture.needsUpdate = true
   }
@@ -313,18 +328,26 @@ function drawScene(currentFrametime) {
   renderer.render(scene, cameras[currentCamera])
 }
 
-// calculate grid convergence angle
-// https://gis.stackexchange.com/questions/115531/calculating-grid-convergence-true-north-to-grid-north
+/**
+ * Grid convergence angle at a point, in degrees: the angle between grid north -
+ * which is the +y axis of the UTM33 grid the terrain is built on, and therefore
+ * what the flight model's heading is measured against - and true north.
+ *
+ * Add it to a grid bearing to get a true bearing; subtract it to go the other
+ * way. It is zero on the central meridian and grows to roughly +/-17 degrees at
+ * the east and west edges of the terrain, so it has to be evaluated at the
+ * aircraft's current position rather than once at startup.
+ *
+ * https://gis.stackexchange.com/questions/115531/calculating-grid-convergence-true-north-to-grid-north
+ */
 function getCompassOffset(east, north) {
-  const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
-  const lonlat = proj4(utm33NProjection).inverse([east, north])
+  const lonlat = proj4(UTM33N_PROJECTION).inverse([east, north])
 
-  const utmZone = Math.ceil((lonlat[0] + 180) / 6)
-  const centralMeridian = 6 * utmZone - 183
-  const lonDelta = lonlat[0] - centralMeridian
+  const lonDelta = lonlat[0] - UTM33N_CENTRAL_MERIDIAN
 
-  const rotation = Math.atan(Math.tan(lonDelta * Math.DEG2RAD) * Math.sin(lonlat[1] * Math.DEG2RAD)) * Math.RAD2DEG
-  return rotation
+  return (
+    Math.atan(Math.tan(lonDelta * MathUtils.DEG2RAD) * Math.sin(lonlat[1] * MathUtils.DEG2RAD)) * MathUtils.RAD2DEG
+  )
 }
 
 function getStartpointFromParameters(urlParams) {
@@ -335,8 +358,7 @@ function getStartpointFromParameters(urlParams) {
 
   // if input coordinates are GPS lat/lon, convert to utm33
   if (north < 72 && east < 33) {
-    const utm33NProjection = "+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs"
-    const utm = proj4(utm33NProjection, [east, north])
+    const utm = proj4(UTM33N_PROJECTION, [east, north])
     east = utm[0]
     north = utm[1]
   }
@@ -421,6 +443,9 @@ function keyboardHandler(keyboardEvent) {
       break
     case "z": // rudder left
       airplaneControlInput.rudder += 0.3
+      break
+    case "x": // rudder right
+      airplaneControlInput.rudder -= 0.3
       break
     case "j": // external cam left
       externalCameraPosition.compassSpeed -= 0.08

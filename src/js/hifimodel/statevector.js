@@ -118,7 +118,7 @@ export default class StateVector {
     f16.position.set(
       this.epos * SimulationConstants.FEET_TO_METERS,
       this.npos * SimulationConstants.FEET_TO_METERS,
-      this.alt * SimulationConstants.FEET_TO_METERS
+      this.alt * SimulationConstants.FEET_TO_METERS,
     )
     f16.updateMatrixWorld()
   }
@@ -157,7 +157,5 @@ export default class StateVector {
     this.nx = v.nx
     this.ny = v.ny
     this.nz = v.nz
-
-    this.pow += dt * v.pow
   }
 }
