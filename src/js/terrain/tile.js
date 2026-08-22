@@ -25,7 +25,6 @@ export default class Tile {
     this.tileMesh = new Mesh()
     this.tileMesh.position.set(lowerLeft.x, lowerLeft.y, 0)
     this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
-    this.tileMesh.updateMatrixWorld()
 
     this.tileMesh.geometry = new BufferGeometry()
     // use a very simple material, all light and shading of terrain is baked into the texture
@@ -112,13 +111,13 @@ export default class Tile {
           () => {},
           (error) => {
             console.log(`Texture error loading ${this.tileName}.ktx2:`, error)
-          }
+          },
         )
       },
       () => {},
       (error) => {
         console.log(`GLB Error loading ${this.tileName}.glb:`, error)
-      }
+      },
     )
   }
 }

@@ -1,3 +1,22 @@
+import SimulationConstants from "../simulationconstants.js"
+
+const TROPOPAUSE = 36089 /* ft */
+const TROPOPAUSE_TEMPERATURE = 389.97 /* Rankine */
+
+const SEA_LEVEL_TEMPERATURE = 518.67 /* Rankine */
+const SEA_LEVEL_DENSITY = 0.002377 /* slug/ft^3 */
+
+const LAPSE_SCALE = 145442 /* ft */
+
+const DENSITY_EXPONENT = 4.255876
+
+const GAS_CONSTANT = 1716.56 /* ft lbf / slug R */
+const GAMMA = 1.403 /* ratio of specific heats */
+
+const TROPOPAUSE_DENSITY = SEA_LEVEL_DENSITY * Math.pow(1 - TROPOPAUSE / LAPSE_SCALE, DENSITY_EXPONENT)
+
+const SCALE_HEIGHT = (GAS_CONSTANT * TROPOPAUSE_TEMPERATURE) / SimulationConstants.G
+
 export default class AtmosphericModel {
   constructor() {
     this.rmach = 0
@@ -5,19 +24,21 @@ export default class AtmosphericModel {
     this.ps = 0
   }
 
-  /**
-   * Computes properties of the standard atmosphere.
-   */
   update(vt, alt) {
-    let tfac = 1.0 - alt / 145442
-    let t = 518.67 * tfac
-    if (alt >= 36089) {
-      t = 389.97
-    }
-    let rho = 0.002377 * Math.pow(tfac, 4.255876)
+    let t
+    let rho
 
-    this.rmach = vt / Math.sqrt(1.403 * 1716.56 * t)
+    if (alt < TROPOPAUSE) {
+      const tfac = 1 - alt / LAPSE_SCALE
+      t = SEA_LEVEL_TEMPERATURE * tfac
+      rho = SEA_LEVEL_DENSITY * Math.pow(tfac, DENSITY_EXPONENT)
+    } else {
+      t = TROPOPAUSE_TEMPERATURE
+      rho = TROPOPAUSE_DENSITY * Math.exp(-(alt - TROPOPAUSE) / SCALE_HEIGHT)
+    }
+
+    this.rmach = vt / Math.sqrt(GAMMA * GAS_CONSTANT * t)
     this.qbar = 0.5 * rho * vt * vt
-    this.ps = 1716.56 * rho * t
+    this.ps = GAS_CONSTANT * rho * t
   }
 }

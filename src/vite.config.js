@@ -5,6 +5,8 @@ export default defineConfig({
     port: 8000,
     open: "?local",
   },
+  // comment out when running locally
+  base: "/flightsimulator/",
   plugins: [
     {
       name: "requestLogger",

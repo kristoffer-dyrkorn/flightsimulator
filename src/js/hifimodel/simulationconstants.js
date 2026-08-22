@@ -43,6 +43,12 @@ SimulationConstants.LEF_MAX = 25
 SimulationConstants.SPEEDBRAKE_MIN = 0
 SimulationConstants.SPEEDBRAKE_MAX = 60
 
+// FCS limits to G, alpha and roll
+SimulationConstants.NZ_MAX = 9.0
+SimulationConstants.NZ_MIN = -3.0
+SimulationConstants.ALPHA_LIMIT = 25.0
+SimulationConstants.ROLL_RATE_MAX = 300.0
+
 SimulationConstants.RTOD = 180 / Math.PI
 SimulationConstants.DTOR = Math.PI / 180
 

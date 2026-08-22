@@ -21,8 +21,11 @@ import {
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js"
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js"
 import StateVector from "./hifimodel/statevector.js"
-import InputVector from "./hifimodel/inputvector.js"
+import InputVector, { STICK_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
+import FlightControlSystem from "./hifimodel/models/flightcontrolsystem.js"
+import RungeKutta4 from "./hifimodel/integrator.js"
+import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
 import Gamepad from "./controller/gamepad.js"
@@ -47,20 +50,14 @@ const TILE_EXTENTS = 50 * 255
 let showWireFrame = false
 let previousFrameTime = 0
 
-// The flight model is integrated with forward Euler, which goes unstable if the
-// step gets too large - a step of 0.25 s is enough to send the state to NaN. So
-// it runs at a fixed step, decoupled from the frame rate, and long frames are
-// covered by taking several steps. MAX_PHYSICS_STEPS caps the work a single
-// frame can trigger, so a browser stall (tab switch, GC pause, terrain load)
-// cannot cascade into an ever-growing backlog of steps. A step costs ~40 us, so
-// the cap can be generous - 30 steps keeps real time down to 4 fps for around
-// 1 ms of work, which is nowhere near being the reason a frame is slow.
-const PHYSICS_STEP = 1 / 120 // seconds
-const MAX_PHYSICS_STEPS = 30
+const PHYSICS_STEP = 1 / 60 // seconds
+const MAX_PHYSICS_STEPS = 15
 
 let physicsTimeDebt = 0
 
 let currentCamera = 0
+let compassOffset = 0
+let heightAboveGround = 0
 
 let gamepad = null
 let engineSound = null
@@ -76,11 +73,6 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 const hudCanvas = document.getElementById("hud")
 const hud = new HUDObject(hudCanvas)
 
-// NOTE this makes all objects STATIC
-// i.e. the matrix stack for ANY moving or rotating objects must manually be updated when needed
-Object3D.matrixWorldAutoUpdate = false
-Object3D.matrixAutoUpdate = false
-
 const scene = new Scene()
 
 scene.background = new Color(0.74, 0.74, 0.82).convertSRGBToLinear()
@@ -89,7 +81,6 @@ scene.fog = new FogExp2(scene.background, 0.000042)
 // add lights to the scene, to propely display the f16 model
 const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
 directionalLight.position.set(0, -0.2, 0.8)
-directionalLight.updateMatrixWorld()
 scene.add(directionalLight)
 
 const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
@@ -113,13 +104,15 @@ cameras.push(camera)
 cameras.push(camera.clone())
 cameras.push(camera.clone())
 
-// initial position of "wingman view" camera
 const externalCameraPosition = {
   distance: 50,
   compass: 0,
   compassSpeed: 0,
   inclination: 90,
 }
+
+const EXTERNAL_CAMERA_SLEW_STEP = 4.8
+const EXTERNAL_CAMERA_MIN_DISTANCE = 10
 
 // set up container object for the 3D aircraft model
 const f16 = new Object3D()
@@ -134,7 +127,6 @@ hudMaterial.transparent = true
 
 const hudPlane = new Mesh(hudGeometry, hudMaterial)
 hudPlane.position.set(0, 0, -2)
-hudPlane.updateMatrixWorld()
 camera.add(hudPlane)
 
 // load the actual aircraft model into the scene
@@ -147,14 +139,12 @@ const chaseObject = new ChaseObject(f16)
 // read out start position and direction
 const url = new URL(document.location)
 const urlParams = url.searchParams
-const startPoint = getStartpointFromParameters(urlParams)
+const startPoint = await getStartpointFromParameters(urlParams)
 let startDirection = +urlParams.get("c") || 0
 
 camera.position.set(startPoint[0], startPoint[1], startPoint[2])
 
-// the "c" parameter is a true heading, but the flight model measures heading
-// against grid north, so take out the grid convergence at the start position.
-// startPoint[3] is getCompassOffset() evaluated there.
+// convert requested compass direction to direction inside UTM grid
 startDirection -= startPoint[3]
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
@@ -163,7 +153,20 @@ const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 const f16simulation = new F16Simulation()
 const airplaneState = new StateVector()
 airplaneState.init(startPoint, startDirection)
+
+// keep two physics states in the physics loop, to allow for interpolation
+const previousAirplaneState = new StateVector()
+previousAirplaneState.copyFrom(airplaneState)
+
+// renderstate is the interpolated state for the exact time instance we need to render
+const renderState = new StateVector()
+renderState.copyFrom(airplaneState)
 const airplaneControlInput = new InputVector()
+
+// pilot input -> FCS -> actuators -> control surfaces -> physics model
+const flightControlSystem = new FlightControlSystem()
+const controlActuators = new ActuatorModel()
+const integrator = new RungeKutta4()
 
 // set up various event handlers
 const startButton = document.getElementById("start")
@@ -183,7 +186,7 @@ window.addEventListener("gamepaddisconnected", (event) => {
   gamepad = null
 })
 
-// log scene stats
+// log scene stats, every 3 secs
 setInterval(() => {
   //  console.log("Time offset: " + (new Date().getTime() - startTime))
   console.log("Tiles loaded: " + Tile.loadCount)
@@ -192,12 +195,15 @@ setInterval(() => {
   console.log("Triangles rendered: " + renderer.info.render.triangles)
 }, 3000)
 
-// register flight trail points every N ms
+// update grid convergence angle every 60 secs
 setInterval(() => {
-  chaseObject.addPoint(f16)
-}, ChaseObject.timeInterval)
+  compassOffset = getCompassOffset(
+    airplaneState.epos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.npos * SimulationConstants.FEET_TO_METERS,
+  )
+}, 60000)
 
-// check for ground collision
+// check for ground collision every 200 ms
 setInterval(() => {
   // get the coordinates of the tile surrounding the camera
   const tileXOffset = (camera.position.x - MINX) % TILE_EXTENTS
@@ -215,20 +221,20 @@ setInterval(() => {
     // in the GLB, y is up, so read max y to get max elevation
     const maxElevationInTile = tileGeometry.boundingBox.max.y
 
-    // optimization: only do ray casting if we are below the max elevation for the tile
-    if (cameraElevation < maxElevationInTile) {
-      // set ray origin to the camera position
-      // use relative coordinates inside the tile to match the geometry's coordinates
-      // and convert from z up to y up
-      interSectionRay.origin.set(tileXOffset, camera.position.z, -tileYOffset)
+    // set ray origin to the camera position
+    // use relative coordinates inside the tile to match the geometry's coordinates
+    // and convert from z up to y up
+    interSectionRay.origin.set(tileXOffset, camera.position.z, -tileYOffset)
 
-      // cast a ray from the camera position and straight down towards the terrain
-      const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
+    // cast a ray from the camera position and straight down towards the terrain
+    const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
 
-      // flag collision if we were too low or there was no hit (we were under the surface)
-      if (!hit || hit.distance < 4) {
-        document.location.href = "collision.html"
-      }
+    // flag collision if we were too low or there was no hit (we were under the surface)
+    if (!hit || hit.distance < 4) {
+      document.location.href = "collision.html"
+    } else {
+      // register height above ground, for general use
+      heightAboveGround = hit.distance
     }
   }
 }, 200)
@@ -266,29 +272,28 @@ function drawScene(currentFrametime) {
 
   let steps = 0
   while (physicsTimeDebt >= PHYSICS_STEP && steps < MAX_PHYSICS_STEPS) {
-    const stateDerivative = f16simulation.getStateDerivative(airplaneControlInput, airplaneState)
-    airplaneState.integrate(stateDerivative, PHYSICS_STEP)
+    // run physics simulation loop until it is ajour
+    flightControlSystem.update(airplaneControlInput, airplaneState, PHYSICS_STEP)
+    controlActuators.update(flightControlSystem.commands, PHYSICS_STEP)
+
+    // keep two newest states around, for interpolation
+    previousAirplaneState.copyFrom(airplaneState)
+
+    integrator.step(f16simulation, controlActuators, airplaneState, PHYSICS_STEP)
     physicsTimeDebt -= PHYSICS_STEP
     steps++
   }
 
-  // drop whatever is left over after a stall rather than trying to catch up -
-  // the simulation briefly runs slow, which is far better than exploding
+  // reset lag if needed
   if (steps === MAX_PHYSICS_STEPS) {
     physicsTimeDebt = 0
   }
 
-  airplaneState.updateAircraftModel(f16)
+  renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
+  renderState.updateAircraftModel(f16)
 
   if (hudPlane.visible) {
-    // grid convergence varies across the map, so evaluate it where the aircraft
-    // is now rather than reusing the value from the start position
-    const compassOffset = getCompassOffset(
-      airplaneState.epos * SimulationConstants.FEET_TO_METERS,
-      airplaneState.npos * SimulationConstants.FEET_TO_METERS
-    )
-
-    hud.update(airplaneState, compassOffset)
+    hud.update(renderState, compassOffset)
     hud.draw()
     hudTexture.needsUpdate = true
   }
@@ -297,71 +302,75 @@ function drawScene(currentFrametime) {
   cameras[0].position.copy(f16.position)
   cameras[0].quaternion.copy(f16.quaternion)
   cameras[0].rotateX(90 * MathUtils.DEG2RAD)
-  cameras[0].updateMatrixWorld()
 
-  const cameraData = chaseObject.getPoint(frameTime)
+  chaseObject.update(f16, frameTime)
 
-  // update current camera - derived from the master camera
   switch (currentCamera) {
     case 1:
-      cameras[currentCamera] = camera.clone()
-      cameras[currentCamera].position.copy(cameraData.position)
-      cameras[currentCamera].quaternion.copy(cameraData.quaternion)
-      cameras[currentCamera].rotateX(90 * MathUtils.DEG2RAD)
-      cameras[currentCamera].updateMatrixWorld()
+      cameras[1].position.copy(chaseObject.position)
+      cameras[1].quaternion.copy(chaseObject.quaternion)
+      cameras[1].rotateX(90 * MathUtils.DEG2RAD)
       break
     case 2:
-      cameras[currentCamera] = camera.clone()
-      cameras[currentCamera].lookAt(f16.position)
-      cameras[currentCamera].rotateZ(externalCameraPosition.compass * MathUtils.DEG2RAD) // compass
-      cameras[currentCamera].rotateX(externalCameraPosition.inclination * MathUtils.DEG2RAD) // above / below horizon
-      cameras[currentCamera].translateZ(externalCameraPosition.distance)
-      cameras[currentCamera].updateMatrixWorld()
+      cameras[2].position.copy(f16.position)
+      cameras[2].quaternion.identity()
+      cameras[2].rotateZ((90 + externalCameraPosition.compass) * MathUtils.DEG2RAD)
+      cameras[2].rotateX(externalCameraPosition.inclination * MathUtils.DEG2RAD)
+      cameras[2].translateZ(externalCameraPosition.distance)
 
-      externalCameraPosition.compass += externalCameraPosition.compassSpeed
+      externalCameraPosition.compass += externalCameraPosition.compassSpeed * frameTime * 0.001
       break
   }
 
   terrain.update(camera, showWireFrame)
-  engineSound.update(cameras[currentCamera], f16, airplaneState.pow)
+  engineSound.update(cameras[currentCamera], f16, renderState.pow)
 
   renderer.render(scene, cameras[currentCamera])
 }
 
-/**
- * Grid convergence angle at a point, in degrees: the angle between grid north -
- * which is the +y axis of the UTM33 grid the terrain is built on, and therefore
- * what the flight model's heading is measured against - and true north.
- *
- * Add it to a grid bearing to get a true bearing; subtract it to go the other
- * way. It is zero on the central meridian and grows to roughly +/-17 degrees at
- * the east and west edges of the terrain, so it has to be evaluated at the
- * aircraft's current position rather than once at startup.
- *
- * https://gis.stackexchange.com/questions/115531/calculating-grid-convergence-true-north-to-grid-north
- */
 function getCompassOffset(east, north) {
-  const lonlat = proj4(UTM33N_PROJECTION).inverse([east, north])
+  // https://gis.stackexchange.com/questions/115531/calculating-grid-convergence-true-north-to-grid-north
 
+  const lonlat = proj4(UTM33N_PROJECTION).inverse([east, north])
   const lonDelta = lonlat[0] - UTM33N_CENTRAL_MERIDIAN
 
-  return (
-    Math.atan(Math.tan(lonDelta * MathUtils.DEG2RAD) * Math.sin(lonlat[1] * MathUtils.DEG2RAD)) * MathUtils.RAD2DEG
-  )
+  return Math.atan(Math.tan(lonDelta * MathUtils.DEG2RAD) * Math.sin(lonlat[1] * MathUtils.DEG2RAD)) * MathUtils.RAD2DEG
 }
 
-function getStartpointFromParameters(urlParams) {
+async function downloadWindData(lonlat, alt) {
+  // https://api.met.no/doc/
+
+  const weatherAPI = "https://api.met.no/weatherapi/nowcast/2.0/complete"
+  const weatherURL = `${weatherAPI}?lat=${lonlat[1].toFixed(3)}&lon=${lonlat[0].toFixed(3)}&altitude=${alt}`
+  const weatherResponse = await fetch(`${weatherURL}`, {
+    method: "GET",
+    headers: {
+      "User-Agent": "https://kristoffer-dyrkorn.github.io/flightsimulator/ - dyrkorn@gmail.com",
+    },
+  })
+  const weatherData = await weatherResponse.json()
+  const { wind_from_direction, wind_speed, wind_speed_of_gust } =
+    weatherData.properties.timeseries[0].data.instant.details
+}
+
+async function getStartpointFromParameters(urlParams) {
   // set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
   let east = +urlParams.get("e") || 105000
   let north = +urlParams.get("n") || 6970000
   const alt = +urlParams.get("a") || 1524 // 5000 ft
 
+  let lonlat = []
   // if input coordinates are GPS lat/lon, convert to utm33
   if (north < 72 && east < 33) {
+    lonlat = [east, north]
     const utm = proj4(UTM33N_PROJECTION, [east, north])
     east = utm[0]
     north = utm[1]
+  } else {
+    lonlat = proj4(UTM33N_PROJECTION).inverse([east, north])
   }
+
+  //  await downloadWindData(lonlat, alt)
 
   const rotation = getCompassOffset(east, north)
 
@@ -379,20 +388,18 @@ function loadAircraftModel(f16) {
       .load(
         "f16.obj",
         (object) => {
-          // center the model at its center of gravity
-          object.position.set(0, 2, -2.3)
+          object.position.set(0, 2, -1.6)
 
           // align model with world axes
           object.rotateX(90 * MathUtils.DEG2RAD)
           object.rotateY(180 * MathUtils.DEG2RAD)
-          object.updateMatrixWorld()
 
           f16.add(object)
         },
         (xhr) => {},
         (error) => {
           console.log("Could not load 3d model: " + error)
-        }
+        },
       )
   })
 }
@@ -416,21 +423,21 @@ function nextCamera() {
 
 function keyboardHandler(keyboardEvent) {
   switch (keyboardEvent.key) {
-    case "ArrowDown": // elevator surface up
-      airplaneControlInput.elevator -= 0.3
+    case "ArrowDown": // stick aft, pull g
+      airplaneControlInput.pitchStick += STICK_STEP
       keyboardEvent.stopPropagation()
       keyboardEvent.preventDefault()
       break
-    case "ArrowUp": // elevator surface down
-      airplaneControlInput.elevator += 0.3
+    case "ArrowUp": // stick forward, push
+      airplaneControlInput.pitchStick -= STICK_STEP
       keyboardEvent.stopPropagation()
       keyboardEvent.preventDefault()
       break
     case "ArrowLeft": // roll left
-      airplaneControlInput.aileron += 0.3
+      airplaneControlInput.rollStick -= STICK_STEP
       break
     case "ArrowRight": // roll right
-      airplaneControlInput.aileron -= 0.3
+      airplaneControlInput.rollStick += STICK_STEP
       break
     case "q":
       airplaneControlInput.throttle += 0.1
@@ -441,17 +448,17 @@ function keyboardHandler(keyboardEvent) {
     case "h": // hud toggle
       hudPlane.visible = !hudPlane.visible
       break
-    case "z": // rudder left
-      airplaneControlInput.rudder += 0.3
+    case "z": // left pedal, yaw left
+      airplaneControlInput.yawPedal -= STICK_STEP
       break
-    case "x": // rudder right
-      airplaneControlInput.rudder -= 0.3
+    case "x": // right pedal, yaw right
+      airplaneControlInput.yawPedal += STICK_STEP
       break
     case "j": // external cam left
-      externalCameraPosition.compassSpeed -= 0.08
+      externalCameraPosition.compassSpeed -= EXTERNAL_CAMERA_SLEW_STEP
       break
     case "l": // external cam right
-      externalCameraPosition.compassSpeed += 0.08
+      externalCameraPosition.compassSpeed += EXTERNAL_CAMERA_SLEW_STEP
       break
     case "i": // external cam up
       externalCameraPosition.inclination -= 2
@@ -460,7 +467,7 @@ function keyboardHandler(keyboardEvent) {
       externalCameraPosition.inclination += 2
       break
     case ",": // external cam nearer
-      externalCameraPosition.distance -= 10
+      externalCameraPosition.distance = Math.max(EXTERNAL_CAMERA_MIN_DISTANCE, externalCameraPosition.distance - 10)
       break
     case ".": // external cam farer
       externalCameraPosition.distance += 10
@@ -480,7 +487,12 @@ function keyboardHandler(keyboardEvent) {
 }
 
 function resetViewport() {
-  camera.aspect = window.innerWidth / window.innerHeight
-  camera.updateProjectionMatrix()
+  const aspect = window.innerWidth / window.innerHeight
+
+  for (const view of cameras) {
+    view.aspect = aspect
+    view.updateProjectionMatrix()
+  }
+
   renderer.setSize(window.innerWidth, window.innerHeight)
 }

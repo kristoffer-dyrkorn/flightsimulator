@@ -1,5 +1,6 @@
 import EngineModel from "./models/enginemodel.js"
 import AtmosphericModel from "./models/atmosphericmodel.js"
+import CompressibilityModel from "./models/compressibilitymodel.js"
 import StateVector from "./statevector.js"
 import SimulationConstants from "./simulationconstants.js"
 import {
@@ -19,6 +20,7 @@ export default class F16Simulation {
   constructor() {
     this.atmosphericModel = new AtmosphericModel()
     this.engineModel = new EngineModel()
+    this.compressibilityModel = new CompressibilityModel()
   }
 
   limit(value, min, max) {
@@ -27,19 +29,10 @@ export default class F16Simulation {
     return value
   }
 
-  // using model at:
-  // https://github.com/shield09/gjf16fcs/blob/master/trim_fun.m#L72
-  // dLEF = 1.38*UX0(3)*180/pi - 9.05*qbar/ps + 1.45;
+  // x = state, ie integrated state derivative
+  // u = actual control positions, output from the actuator model
 
-  setLef(alpha, qbar, ps) {
-    const lef = 1.38 * alpha - (9.05 * qbar) / ps + 1.45
-    return this.limit(lef, SimulationConstants.LEF_MIN, SimulationConstants.LEF_MAX)
-  }
-
-  // x = state, ie INTEGRATED state derivative
-  // u = user input
-
-  getStateDerivative(u, x) {
+  getStateDerivative(u, x, xd = new StateVector()) {
     const g = SimulationConstants.G /* gravity, ft/s^2 */
     const m = SimulationConstants.MASS /* mass, slugs */
     const B = SimulationConstants.B /* span, ft */
@@ -59,9 +52,6 @@ export default class F16Simulation {
     const epos = x.epos /* east position */
     const alt = x.alt /* altitude */
 
-    /* attitude quaternion, q0 = scalar part. this is the primary attitude state -
-       the euler angles in the state vector are derived from it after integration,
-       and are only used for display. */
     const q0 = x.q0
     const q1 = x.q1
     const q2 = x.q2
@@ -88,10 +78,6 @@ export default class F16Simulation {
     const cb = Math.cos(x.beta) /* cos(beta)  */
     const tb = Math.tan(x.beta) /* tan(beta)  */
 
-    /* body -> earth (north/east/down) rotation matrix, built from the attitude
-       quaternion. rows are north, east, down; columns are body x, y, z.
-       using this instead of the euler angles avoids the 1/cos(theta) and
-       tan(theta) singularities that blow up when the aircraft goes vertical. */
     const r00 = q0 * q0 + q1 * q1 - q2 * q2 - q3 * q3
     const r01 = 2 * (q1 * q2 - q0 * q3)
     const r02 = 2 * (q1 * q3 + q0 * q2)
@@ -115,8 +101,7 @@ export default class F16Simulation {
     const rud = u.rudder
     const spbr = u.speedbrake
 
-    /* Leading edge flap setting in degrees */
-    const lef = this.setLef(alpha, this.atmosphericModel.qbar, this.atmosphericModel.ps)
+    const lef = u.lef
 
     const dail = ail / SimulationConstants.AILERON_MAX
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */
@@ -126,8 +111,6 @@ export default class F16Simulation {
     const U = vt * ca * cb /* directional velocities. */
     const V = vt * sb
     const W = vt * sa * cb
-
-    const xd = new StateVector()
 
     xd.pow = this.engineModel.dpow
 
@@ -139,9 +122,6 @@ export default class F16Simulation {
 
     /* altdot - altitude is up, the matrix row is down, hence the sign flip */
     xd.alt = -(r20 * U + r21 * V + r22 * W)
-
-    /* attitude is propagated as a quaternion further down. the euler angles are
-       not integrated - StateVector.integrate() derives them from the quaternion. */
 
     const [Cx, Cz, Cm, Cy, Cn, Cl] = hifi_C(alpha, beta, el)
     const [Cxq, Cyr, Cyp, Czq, Clr, Clp, Cmq, Cnr, Cnp] = hifi_damping(alpha)
@@ -166,24 +146,6 @@ export default class F16Simulation {
 
     const [delta_Cnbeta, delta_Clbeta, delta_Cm, eta_el, delta_Cm_ds] = hifi_other_coeffs(alpha, el)
 
-    // REF https://github.com/jreed1701/f16simulator/blob/master/source/jprsim.h#L293
-    //
-    // Alternatives
-    // https://github.com/marek-cel/mscsim/blob/master/data/fdm/f16/f16_fdm.xml#L184
-
-    // https://ntrs.nasa.gov/api/citations/19760017178/downloads/19760017178.pdf,
-    // PDF-page 34, ->
-    /*
-    SIMULATOR STUDY OF THE EFFECTIVENESS
-    OF AN AUTOMATIC CONTROL SYSTEM
-    DESIGNED TO IMPROVE THE HIGH-ANGLE-OF-ATTACK CHARACTERISTICS
-    OF A FIGHTER AIRPLANE 
-    */
-
-    /* Speedbrake increments, for full 60 degree deflection - scaled by dspbr
-       below. The speedbrake is a drag increment of CD = 0.05 along the wind
-       axis, so in body axes Cx and Cz are just its cos/sin resolution and there
-       is no pitching moment. See CX_ALPHA1_SPBR in dataTables.js. */
     const delta_Cx_spbr_alpha = _CXspbr(alpha)
     const delta_Cz_spbr_alpha = _CZspbr(alpha)
     const delta_Cm_spbr_alpha = _CMsbpr(alpha)
@@ -201,14 +163,7 @@ export default class F16Simulation {
     /* MMMMMMMM Cm_tot MMMMMMMM */
 
     const dMdQ = (cbar / (2 * vt)) * (Cmq + delta_Cmq_lef * dlef)
-    const Cm_tot =
-      Cm * eta_el +
-      Cz_tot * (xcgr - xcg) +
-      delta_Cm_lef * dlef +
-      delta_Cm_spbr_alpha * dspbr +
-      dMdQ * Q +
-      delta_Cm +
-      delta_Cm_ds
+    const Cm_tot = Cm * eta_el + delta_Cm_lef * dlef + delta_Cm_spbr_alpha * dspbr + dMdQ * Q + delta_Cm + delta_Cm_ds
 
     /* YYYYYYYY Cy_tot YYYYYYYY */
 
@@ -244,13 +199,30 @@ export default class F16Simulation {
       Cl + delta_Cl_lef * dlef + dLdail * dail + delta_Cl_r30 * drud + dLdR * R + dLdP * P + delta_Clbeta * beta
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+        compressibility corrections
+        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
+
+    this.compressibilityModel.update(this.atmosphericModel.rmach)
+
+    const CD = -(Cx_tot * ca + Cz_tot * sa)
+    const CL = Cx_tot * sa - Cz_tot * ca
+
+    const CD_mach = CD + this.compressibilityModel.waveDrag
+    const CL_mach = CL * this.compressibilityModel.liftFactor
+
+    const Cx_mach = -CD_mach * ca + CL_mach * sa
+    const Cz_mach = -CD_mach * sa - CL_mach * ca
+
+    const Cm_mach = Cm_tot + Cz_mach * (xcgr - xcg + this.compressibilityModel.acShift)
+
+    /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         compute Udot,Vdot, Wdot,(as on NASA report p36)
         %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
     // total force in z direction
-    const Xbar = this.atmosphericModel.qbar * S * Cx_tot
+    const Xbar = this.atmosphericModel.qbar * S * Cx_mach
     const Ybar = this.atmosphericModel.qbar * S * Cy_tot
-    const Zbar = this.atmosphericModel.qbar * S * Cz_tot
+    const Zbar = this.atmosphericModel.qbar * S * Cz_mach
 
     /* gravity resolved into body axes is g times the "down" row of the
        body -> earth matrix, ie (r20, r21, r22). in euler terms that row is
@@ -282,7 +254,7 @@ export default class F16Simulation {
        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
     const L_tot = Cl_tot * this.atmosphericModel.qbar * S * B /* get moments from coefficients */
-    const M_tot = Cm_tot * this.atmosphericModel.qbar * S * cbar
+    const M_tot = Cm_mach * this.atmosphericModel.qbar * S * cbar
     const N_tot = Cn_tot * this.atmosphericModel.qbar * S * B
 
     const denom = Jx * Jz - Jxz * Jxz
@@ -313,17 +285,11 @@ export default class F16Simulation {
       (Jx * N_tot + Jxz * L_tot + (Jx * (Jx - Jy) + Jxz * Jxz) * P * Q - Jxz * (Jx - Jy + Jz) * Q * R + Jx * Q * Heng) /
       denom
 
-    // from https://github.com/shield09/gjf16fcs/blob/master/F16_dyn.c#L620
-
     xd.q0 = 0.5 * (-P * q1 - Q * q2 - R * q3)
     xd.q1 = 0.5 * (P * q0 + R * q2 - Q * q3)
     xd.q2 = 0.5 * (Q * q0 - R * q1 + P * q3)
     xd.q3 = 0.5 * (R * q0 + Q * q1 - P * q2)
 
-    /* correction term from the Moldy Users Manual by K. Refson. it projects out
-       the component of qdot lying along q, which keeps |q|
-       from drifting away from 1. q.qdot is analytically zero for a unit
-       quaternion, so it only removes accumulated numerical error. */
     const dq = q0 * xd.q0 + q1 * xd.q1 + q2 * xd.q2 + q3 * xd.q3
 
     xd.q0 -= dq * q0
@@ -331,9 +297,6 @@ export default class F16Simulation {
     xd.q2 -= dq * q2
     xd.q3 -= dq * q3
 
-    /* load factors - the specific non-gravitational force along each body axis,
-       in g. this is what an accelerometer at the cg reads, so thrust counts but
-       gravity does not. nz is positive up, hence the sign flip: pilot G. */
     xd.nx = (Xbar + T) / m / g
     xd.ny = Ybar / m / g
     xd.nz = -Zbar / m / g

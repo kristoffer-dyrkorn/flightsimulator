@@ -20,7 +20,7 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 
 Use the keyboard or, if you have, an NXT Gladiator joystick.
 
-Arrow keys control aileron and elevator. `z` and `x`: rudder. `q` and `a`: throttle. Space cycles camera views: cockpit / wingman camera / external camera. For the external camera, `j` and `l` rotates the camera left and right, `i` and `k` rotates it up and down. Use `,` and `.` to move the camera nearer/further away. Use `h` to toggle HUD on and off.
+Arrow keys: stick control. This simulator has a flight control system (FCS), so you do not steer the aircraft directly. The FCS decides how the control surfaces should move to make the aircraft do what you want. `z` and `x`: rudder pedals. `q` and `a`: throttle. Space bar cycles camera views: cockpit / wingman camera / external camera. For the external camera, `j` and `l` rotates the camera left and right, `i` and `k` rotates it up and down. Use `,` and `.` to move the camera nearer/further away. Use `h` to toggle HUD on and off.
 
 ## Screenshots
 
@@ -31,6 +31,19 @@ Arrow keys control aileron and elevator. `z` and `x`: rudder. `q` and `a`: throt
 ![Landing](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
 
 ## Release notes
+
+August 2026:
+
+- Use quaternions instead of Euler angles in the physics model, fixes various numerical instabilites
+- Now calculates the compass direction correctly
+- Decoupled the physics loop from the rendering loop to avoid large time steps (and instability) in the - Fixed leading edge flap calculation (typo in variable name)
+- Fixed wrong data in speed brake aerodynamic table, enabled speed brakes
+- Fixed bug in flight path indicator placement
+- Fixed limitation in atmospheric model for high altitudes
+- Fixed aircraft jitter when using the chase camera
+- Added an FCS and actuator lag, so the input path is: stick input -> FCS model (optimizer/limiter) -> actuator signal -> new rudder positions -> physics model
+- Added air compressability model (transonic drag)
+- Switched from Euler integration to RK4 integration, improving physics model accuracy
 
 July 2025:
 

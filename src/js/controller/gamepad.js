@@ -1,24 +1,27 @@
-import SimulationConstants from "../hifimodel/simulationconstants.js"
+const DEADZONE = 0.04
+
+const PITCH_CENTRE_OFFSET = 0.1
 
 export default class Gamepad {
   constructor() {
     this.gamepads = navigator.getGamepads()
     this.axes = []
     this.buttons = []
-
-    // map joystick deflection to rudder deflection
-    this.sensitivity = 0.15
   }
 
   read(airplaneControlInput) {
     this.getInput()
 
-    airplaneControlInput.aileron = -this.axes[0] * this.sensitivity * SimulationConstants.AILERON_MAX
-    airplaneControlInput.elevator = (-this.axes[1] + 0.1) * this.sensitivity * SimulationConstants.ELEVATOR_MAX
-
-    airplaneControlInput.elevator += SimulationConstants.ELEVATOR_TRIM
+    airplaneControlInput.rollStick = this.centre(this.axes[0])
+    airplaneControlInput.pitchStick = this.centre(this.axes[1] - PITCH_CENTRE_OFFSET)
 
     airplaneControlInput.throttle = 0.5 * (-this.axes[2] + 1)
+  }
+
+  centre(value) {
+    if (value > DEADZONE) return (value - DEADZONE) / (1 - DEADZONE)
+    if (value < -DEADZONE) return (value + DEADZONE) / (1 - DEADZONE)
+    return 0
   }
 
   getInput() {

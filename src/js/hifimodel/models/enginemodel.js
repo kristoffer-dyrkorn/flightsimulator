@@ -37,15 +37,6 @@ export default class EngineModel {
     this.dpow = 0
   }
 
-  /**
-   * Computes the engine thrust and the time derivative of the engine
-   * power state for the F-16.
-   *
-   * @param pow   EngineModel power level, percent. ( 0 <= POW <= 100. )
-   * @param alt   Altitude, ft.                ( 0 <= ALT <= 50000. )
-   * @param rmach Mach number.                 ( 0 <= RMACH <= 1.0 )
-   * @param thtl  Throttle setting.            ( 0 <= THTL <= 1.0 )
-   */
   update(pow, alt, rmach, thtl) {
     // Compute engine thrust.
     this.thrust = this.engineThrust(pow, alt, rmach)
