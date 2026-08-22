@@ -36,14 +36,15 @@ August 2026:
 
 - Use quaternions instead of Euler angles in the physics model, fixes various numerical instabilites
 - Now calculates the compass direction correctly
-- Decoupled the physics loop from the rendering loop to avoid large time steps (and instability) in the - Fixed leading edge flap calculation (typo in variable name)
-- Fixed wrong data in speed brake aerodynamic table, enabled speed brakes
+- Decoupled the physics loop from the rendering loop to avoid large time steps (and instability)
+- Fixed leading edge flap calculations (typo in variable name)
+- Fixed wrong data in speed brake aerodynamic table and enabled speed brakes
 - Fixed bug in flight path indicator placement
-- Fixed limitation in atmospheric model for high altitudes
+- Fixed limitations in the atmospheric model for high altitudes
 - Fixed aircraft jitter when using the chase camera
-- Added an FCS and actuator lag, so the input path is: stick input -> FCS model (optimizer/limiter) -> actuator signal -> new rudder positions -> physics model
-- Added air compressability model (transonic drag)
-- Switched from Euler integration to RK4 integration, improving physics model accuracy
+- Added actuator lag and an FCS. The data flow is now: stick input -> FCS model (optimizer/limiter) -> actuator signal -> updated rudder positions -> physics model
+- Added air compressibility model (transonic drag)
+- Switched from Euler integration to RK4 integration in the physics model, improving accuracy
 
 July 2025:
 
