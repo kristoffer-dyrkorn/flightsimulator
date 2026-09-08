@@ -28,6 +28,7 @@ import RungeKutta4 from "./hifimodel/integrator.js"
 import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
+import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
@@ -79,6 +80,7 @@ let heightAboveGround = 0
 
 let gamepad = null
 let engineSound = null
+let controlSurfaceRig = null
 
 // ray for intersection testing with ground, direction is in GLB coordinates (y up)
 const interSectionRay = new Ray(new Vector3(0, 0, 0), new Vector3(0, -1, 0))
@@ -352,6 +354,7 @@ function drawScene(currentFrametime) {
 
   renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
   renderState.updateAircraftModel(f16)
+  controlSurfaceRig?.update(controlActuators)
 
   if (hudPlane.visible) {
     hud.update(renderState, airplaneControlInput, f16simulation.atmosphericModel, compassOffset)
@@ -489,6 +492,7 @@ function loadAircraftModel(f16) {
           object.rotateY(180 * MathUtils.DEG2RAD)
 
           f16.add(object)
+          controlSurfaceRig = new ControlSurfaceRig(object)
         },
         (xhr) => {},
         (error) => {
