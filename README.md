@@ -32,6 +32,10 @@ Arrow keys: stick control. This simulator has a flight control system (FCS), so 
 
 ## Release notes
 
+September 2026:
+
+- Added von Kármán wind turbulence model
+
 August 2026:
 
 - Use quaternions instead of Euler angles in the physics model, fixes various numerical instabilites
