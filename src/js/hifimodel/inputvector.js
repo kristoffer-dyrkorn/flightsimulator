@@ -5,9 +5,18 @@ const CONTROL_CENTERING_PER_SECOND = Math.pow(0.98, 60)
 // how far one keypress moves the stick, fraction of full travel
 export const STICK_STEP = 0.05
 
+// how far one keypress moves the throttle, fraction of full travel
+export const THROTTLE_STEP = 0.1
+
+// time to ramp the throttle to a newly commanded setting, seconds - a keypress
+// does not snap the lever, it moves it there smoothly, like a real hand would
+const THROTTLE_RAMP_TIME = 0.5
+const THROTTLE_RATE_PER_SECOND = THROTTLE_STEP / THROTTLE_RAMP_TIME
+
 export default class InputVector {
   constructor() {
     this.throttle = 0.3
+    this.targetThrottle = 0.3
 
     this.pitchStick = 0 // -1..1, positive is aft
     this.rollStick = 0 // -1..1, positive is right
@@ -18,7 +27,20 @@ export default class InputVector {
   }
 
   normalizeControls(dt) {
-    this.throttle = this.limiter(this.throttle, SimulationConstants.POWER_MIN, SimulationConstants.POWER_MAX)
+    this.targetThrottle = this.limiter(
+      this.targetThrottle,
+      SimulationConstants.THROTTLE_MIN,
+      SimulationConstants.THROTTLE_MAX,
+    )
+
+    const throttleDelta = this.targetThrottle - this.throttle
+    const maxStep = THROTTLE_RATE_PER_SECOND * dt
+
+    if (Math.abs(throttleDelta) <= maxStep) {
+      this.throttle = this.targetThrottle
+    } else {
+      this.throttle += Math.sign(throttleDelta) * maxStep
+    }
 
     this.pitchStick = this.limiter(this.pitchStick, -1, 1)
     this.rollStick = this.limiter(this.rollStick, -1, 1)

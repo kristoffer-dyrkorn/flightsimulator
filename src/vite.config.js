@@ -6,7 +6,7 @@ export default defineConfig({
     open: "?local",
   },
   // comment out when running locally
-  base: "/flightsimulator/",
+  // base: "/flightsimulator/",
   plugins: [
     {
       name: "requestLogger",

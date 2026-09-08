@@ -21,7 +21,7 @@ import {
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js"
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js"
 import StateVector from "./hifimodel/statevector.js"
-import InputVector, { STICK_STEP } from "./hifimodel/inputvector.js"
+import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
 import FlightControlSystem from "./hifimodel/models/flightcontrolsystem.js"
 import RungeKutta4 from "./hifimodel/integrator.js"
@@ -52,6 +52,24 @@ let previousFrameTime = 0
 
 const PHYSICS_STEP = 1 / 60 // seconds
 const MAX_PHYSICS_STEPS = 15
+
+// Heights to read the forecast at, m above sea level - the surface and then
+// roughly 5000, 10000 and 20000 ft. One request each, which is enough to see the
+// shape of the wind with height without leaning on a free service.
+const WIND_PROFILE_ALTITUDES = [0, 1500, 3000, 6000]
+
+// At the surface the forecast is the wind 10 m up. The turbulence model wants
+// the wind at 20 ft, and the two differ by the shape of the boundary layer: the
+// logarithmic profile, over terrain of middling roughness. It works out at about
+// nine tenths of the reported speed.
+const FORECAST_WIND_HEIGHT = 10 // m
+const TURBULENCE_WIND_HEIGHT = 20 * SimulationConstants.FEET_TO_METERS
+const TERRAIN_ROUGHNESS = 0.15 // m, mixed farmland and forest
+
+const SURFACE_WIND_FACTOR =
+  Math.log(TURBULENCE_WIND_HEIGHT / TERRAIN_ROUGHNESS) / Math.log(FORECAST_WIND_HEIGHT / TERRAIN_ROUGHNESS)
+
+const KNOTS_PER_FOOT_PER_SECOND = 0.592484
 
 let physicsTimeDebt = 0
 
@@ -153,6 +171,40 @@ const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 const f16simulation = new F16Simulation()
 const airplaneState = new StateVector()
 airplaneState.init(startPoint, startDirection)
+
+// the ray cast that measures this has not run yet, so until it does, assume the
+// terrain below the start point is at sea level. the turbulence model needs a
+// height from the first step onwards, and it scales its eddies by it.
+heightAboveGround = startPoint[2]
+
+// Fly in the real weather: ask MET what the wind is doing over the start point
+// at each of a few heights, and hand the profile to the turbulence model - the
+// surface wind for the roughness down low, and how the wind changes with height
+// for the turbulence aloft. Deliberately not awaited: the simulation starts on
+// the default weather and picks the real one up a moment later, and carries on
+// with the default if the service cannot be reached.
+Promise.all(WIND_PROFILE_ALTITUDES.map((altitude) => downloadWindData(startPoint[4], altitude))).then((levels) => {
+  const profile = levels.filter(Boolean).sort((a, b) => a.altitude - b.altitude)
+
+  if (profile.length === 0) return
+
+  // the lowest level is the surface wind, and the surface wind is the one the
+  // boundary layer profile applies to
+  f16simulation.turbulenceModel.setWind(profile[0].speed * SURFACE_WIND_FACTOR, profile)
+
+  // the same profile is the steady wind the aircraft is carried along by
+  f16simulation.windModel.setWind(profile)
+
+  for (const level of profile) {
+    console.log(
+      "Wind at %d ft: %d knots from %d degrees, gusting %d",
+      Math.round(level.altitude),
+      Math.round(level.speed * KNOTS_PER_FOOT_PER_SECOND),
+      Math.round(level.direction),
+      Math.round(level.gust * KNOTS_PER_FOOT_PER_SECOND),
+    )
+  }
+})
 
 // keep two physics states in the physics loop, to allow for interpolation
 const previousAirplaneState = new StateVector()
@@ -276,6 +328,15 @@ function drawScene(currentFrametime) {
     flightControlSystem.update(airplaneControlInput, airplaneState, PHYSICS_STEP)
     controlActuators.update(flightControlSystem.commands, PHYSICS_STEP)
 
+    // step the gust field once per physics step - it belongs to the air, not to
+    // the aircraft, so it is held fixed across the four stages of the integrator
+    f16simulation.turbulenceModel.update(
+      heightAboveGround * SimulationConstants.METERS_TO_FEET,
+      airplaneState.alt,
+      airplaneState.airspeed,
+      PHYSICS_STEP,
+    )
+
     // keep two newest states around, for interpolation
     previousAirplaneState.copyFrom(airplaneState)
 
@@ -293,7 +354,7 @@ function drawScene(currentFrametime) {
   renderState.updateAircraftModel(f16)
 
   if (hudPlane.visible) {
-    hud.update(renderState, compassOffset)
+    hud.update(renderState, airplaneControlInput, f16simulation.atmosphericModel, compassOffset)
     hud.draw()
     hudTexture.needsUpdate = true
   }
@@ -342,19 +403,54 @@ async function downloadWindData(lonlat, alt) {
 
   const weatherAPI = "https://api.met.no/weatherapi/nowcast/2.0/complete"
   const weatherURL = `${weatherAPI}?lat=${lonlat[1].toFixed(3)}&lon=${lonlat[0].toFixed(3)}&altitude=${alt}`
-  const weatherResponse = await fetch(`${weatherURL}`, {
-    method: "GET",
-    headers: {
-      "User-Agent": "https://kristoffer-dyrkorn.github.io/flightsimulator/ - dyrkorn@gmail.com",
-    },
-  })
-  const weatherData = await weatherResponse.json()
-  const { wind_from_direction, wind_speed, wind_speed_of_gust } =
-    weatherData.properties.timeseries[0].data.instant.details
+
+  try {
+    const weatherResponse = await fetch(`${weatherURL}`, {
+      method: "GET",
+      headers: {
+        "User-Agent": "https://github.com/kristoffer-dyrkorn/flightsimulator - dyrkorn@gmail.com",
+      },
+    })
+
+    if (!weatherResponse.ok) {
+      throw new Error(`the weather service answered ${weatherResponse.status}`)
+    }
+
+    const weatherData = await weatherResponse.json()
+
+    // only the first entry of the series carries the wind - the ones after it are
+    // the precipitation forecast, and have nothing else in them
+    const { wind_from_direction, wind_speed, wind_speed_of_gust } =
+      weatherData.properties.timeseries[0].data.instant.details
+
+    // the altitude asked for comes back as the third coordinate of the point
+    const altitude = weatherData.geometry.coordinates[2] ?? alt
+
+    // speeds are reported in m/s and the flight model works in ft/s
+    const speed = wind_speed * SimulationConstants.METERS_TO_FEET
+    const gust = (wind_speed_of_gust ?? wind_speed) * SimulationConstants.METERS_TO_FEET
+
+    // a wind direction is the direction the wind comes from, so the direction it
+    // blows towards - which is what a velocity needs - is the opposite one
+    const heading = (wind_from_direction + 180) * MathUtils.DEG2RAD
+
+    return {
+      altitude: altitude * SimulationConstants.METERS_TO_FEET,
+      east: speed * Math.sin(heading),
+      north: speed * Math.cos(heading),
+      speed,
+      gust,
+      direction: wind_from_direction,
+    }
+  } catch (error) {
+    console.log("Could not read wind data: %s", error.message)
+    return null
+  }
 }
 
 async function getStartpointFromParameters(urlParams) {
-  // set start point: UTM EAST, UTM NORTH, altitude (meters) and compass direction
+  // set start point: UTM EAST, UTM NORTH, altitude (meters), compass direction,
+  // and the same position as lon/lat, for whoever needs it in degrees
   let east = +urlParams.get("e") || 105000
   let north = +urlParams.get("n") || 6970000
   const alt = +urlParams.get("a") || 1524 // 5000 ft
@@ -370,11 +466,9 @@ async function getStartpointFromParameters(urlParams) {
     lonlat = proj4(UTM33N_PROJECTION).inverse([east, north])
   }
 
-  //  await downloadWindData(lonlat, alt)
-
   const rotation = getCompassOffset(east, north)
 
-  return [east, north, alt, rotation]
+  return [east, north, alt, rotation, lonlat]
 }
 
 function loadAircraftModel(f16) {
@@ -440,14 +534,24 @@ function keyboardHandler(keyboardEvent) {
       airplaneControlInput.rollStick += STICK_STEP
       break
     case "q":
-      airplaneControlInput.throttle += 0.1
+      airplaneControlInput.targetThrottle += THROTTLE_STEP
       break
     case "a":
-      airplaneControlInput.throttle -= 0.1
+      airplaneControlInput.targetThrottle -= THROTTLE_STEP
       break
     case "h": // hud toggle
       hudPlane.visible = !hudPlane.visible
       break
+    case "t": {
+      // weather on/off - the steady wind and the turbulence in it, together
+      const weather = !f16simulation.windModel.enabled
+
+      f16simulation.windModel.setEnabled(weather)
+      f16simulation.turbulenceModel.setEnabled(weather)
+
+      console.log("Wind and turbulence: %s", weather ? "on" : "off")
+      break
+    }
     case "z": // left pedal, yaw left
       airplaneControlInput.yawPedal -= STICK_STEP
       break

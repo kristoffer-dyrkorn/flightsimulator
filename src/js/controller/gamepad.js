@@ -15,7 +15,11 @@ export default class Gamepad {
     airplaneControlInput.rollStick = this.centre(this.axes[0])
     airplaneControlInput.pitchStick = this.centre(this.axes[1] - PITCH_CENTRE_OFFSET)
 
-    airplaneControlInput.throttle = 0.5 * (-this.axes[2] + 1)
+    // the lever position, applied directly - the ramp in normalizeControls() is
+    // for keyboard taps only, an analog axis already reports where the lever is
+    const throttle = 0.5 * (-this.axes[2] + 1)
+    airplaneControlInput.throttle = throttle
+    airplaneControlInput.targetThrottle = throttle
   }
 
   centre(value) {

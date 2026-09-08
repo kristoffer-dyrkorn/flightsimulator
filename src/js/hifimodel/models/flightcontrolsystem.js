@@ -171,7 +171,10 @@ export default class FlightControlSystem {
     const q = x.q * SimulationConstants.RTOD
     const r = x.r * SimulationConstants.RTOD
 
-    this.atmosphericModel.update(x.vt, x.alt)
+    /* Scheduled on airspeed, not on speed over the ground: the gains stand in
+       for how much authority the surfaces have, and that is a question about the
+       air going past them. In still air the two are the same number. */
+    this.atmosphericModel.update(x.airspeed, x.alt)
     this.compressibilityModel.update(this.atmosphericModel.rmach)
 
     /* qbar is floored before the division: at a standstill it is zero, and the

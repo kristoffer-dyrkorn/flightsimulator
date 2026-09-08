@@ -34,6 +34,11 @@ export default class StateVector {
     this.nx = 0
     this.ny = 0
     this.nz = 0
+    // speed through the air, ft/sec. vt above is the speed over the ground, and
+    // in a wind the two are not the same thing. Not integrated - the flight
+    // model works it out from the wind it is flying through, and puts it here
+    // for the instruments and the control laws to read.
+    this.airspeed = 0
     this.pow = 0 // percent, 0 <= pow <= 100
   }
 
@@ -55,6 +60,7 @@ export default class StateVector {
     this.updateEulerAngles()
 
     this.vt = 506 // feet/sec, ~ km/t => 300 knots
+    this.airspeed = this.vt
     this.pow = 30 // % thrust
 
     // set initial G to constant, level flight
@@ -124,6 +130,8 @@ export default class StateVector {
     this.ny = other.ny
     this.nz = other.nz
 
+    this.airspeed = other.airspeed
+
     this.pow = other.pow
   }
 
@@ -144,6 +152,8 @@ export default class StateVector {
     this.nx = from.nx + (to.nx - from.nx) * alongStep
     this.ny = from.ny + (to.ny - from.ny) * alongStep
     this.nz = from.nz + (to.nz - from.nz) * alongStep
+
+    this.airspeed = from.airspeed + (to.airspeed - from.airspeed) * alongStep
 
     this.pow = from.pow + (to.pow - from.pow) * alongStep
 
@@ -225,5 +235,7 @@ export default class StateVector {
     this.nx = (k1.nx + 2 * k2.nx + 2 * k3.nx + k4.nx) / 6
     this.ny = (k1.ny + 2 * k2.ny + 2 * k3.ny + k4.ny) / 6
     this.nz = (k1.nz + 2 * k2.nz + 2 * k3.nz + k4.nz) / 6
+
+    this.airspeed = (k1.airspeed + 2 * k2.airspeed + 2 * k3.airspeed + k4.airspeed) / 6
   }
 }

@@ -24,20 +24,23 @@ export default class HUDObject {
    *                       psi is measured against grid north, so this converts
    *                       it to a true heading.
    */
-  update(airplaneState, compassOffset) {
+  update(airplaneState, airplaneControlInput, atmosphericModel, compassOffset) {
     this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi + compassOffset)
 
     // wrap into 0..359
     this.heading = ((this.heading % 360) + 360) % 360
 
-    this.speed = Math.round(0.592484 * airplaneState.vt)
+    // airspeed, as an airspeed indicator reads: what the aircraft is doing
+    // through the air, not over the ground
+    this.speed = Math.round(0.592484 * airplaneState.airspeed)
+    this.mach = atmosphericModel.rmach.toFixed(2)
     this.altitude = Math.round(airplaneState.alt)
 
     this.altitude = this.altitude.toLocaleString(undefined, {
       maximumFractionDigits: 0,
     })
 
-    this.thrust = Math.round(airplaneState.pow)
+    this.throttle = Math.round(100 * airplaneControlInput.throttle)
     this.pitch = airplaneState.theta
     this.roll = airplaneState.phi
     this.aoa = airplaneState.alpha
@@ -187,8 +190,13 @@ export default class HUDObject {
 
     const aoaText = Math.round(this.aoa * MathUtils.RAD2DEG)
 
-    this.ctx.fillText(`AOA ${aoaText}`, 30, 0.86 * this.height)
-    this.ctx.fillText(`POW ${this.thrust}`, 30, 0.9 * this.height)
+    this.ctx.fillText(`AOA ${aoaText}`, 30, 0.82 * this.height)
+    this.ctx.fillText(`M ${this.mach}`, 30, 0.86 * this.height)
+    this.ctx.fillText(`THR ${this.throttle}`, 30, 0.9 * this.height)
+
+    if (this.throttle > 77) {
+      this.ctx.fillText(`AB`, 30, 0.94 * this.height)
+    }
 
     const gText = "" + this.g.toFixed(1)
 

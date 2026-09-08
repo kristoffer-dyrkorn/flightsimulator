@@ -7,11 +7,10 @@ SimulationConstants.ALTITUDE_MIN = 0
 SimulationConstants.ALTITUDE_MAX = 50000
 
 SimulationConstants.MACH_MIN = 0.0
-SimulationConstants.MACH_MAX = 1.0
 
 // throttle setting, fraction
-SimulationConstants.POWER_MIN = 0.0
-SimulationConstants.POWER_MAX = 1.0
+SimulationConstants.THROTTLE_MIN = 0.1
+SimulationConstants.THROTTLE_MAX = 1.0
 
 // engine power state, percent
 SimulationConstants.POWER_LEVEL_MIN = 0.0
