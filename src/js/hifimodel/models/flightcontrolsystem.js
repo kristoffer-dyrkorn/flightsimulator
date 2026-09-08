@@ -94,10 +94,41 @@ const ALPHA_RATE_TAU = 0.2 /* seconds, smoothing on the differentiated AoA */
    ailerons on their stops, so that a full roll command gets the roll rate the
    airframe actually has rather than the lower one the loop gain would settle
    for. Roll authority is given up as the angle of attack limit approaches -
-   rolling hard at high AoA is what departs an aircraft, so the FLCS refuses. */
-const ROLL_P = 0.6 /* deg of aileron per deg/s of roll rate error */
+   rolling hard at high AoA is what departs an aircraft, so the FLCS refuses.
+
+   ROLL_P used to be 0.6, which sounds modest next to the pitch loop's 2.0,
+   but the two are not on the same footing: pitch commands g, against a
+   command range of several g, while roll commands deg/s against a range of
+   hundreds of them, so the same-looking number was actually a far harder
+   push on the actuator. At 0.6, the aileron actuator's own 80 deg/s rate
+   limit was the binding constraint once the roll rate error passed a mere
+   6.6 deg/s - about 2% of what full stick asks for - so from the first
+   instant of essentially any stick input, aileron travel was set by the
+   actuator's hardware limit, not by how far the stick had actually moved.
+   Every tap looked and felt the same: a snap to full rate.
+
+   The pitch loop does not have that problem - its own rate-limit threshold
+   (worked out the same way, from PITCH_NZ_P and the elevator actuator's own
+   rate and bandwidth in actuatormodel.js) is a bit under 1.5g, close to a
+   fifth of the 8g of nose-up command range full aft stick can ask for - so
+   small stick inputs mostly stay in smooth proportional territory and only
+   the more aggressive ones reach the actuator's limit. Retuned to put the
+   aileron loop on the same footing: small roll inputs now ease the surface
+   in instead of always slamming it, while full stick still walks the
+   aileron out to its stops exactly as before - lowering the gain does not
+   lower the ceiling, it only softens how fast small commands get there. */
+const ROLL_P = 0.071 /* deg of aileron per deg/s of roll rate error */
 const ROLL_ALPHA_FADE_START = 15 /* deg, where roll authority starts to fade */
 const ROLL_ALPHA_FADE = 0.7 /* fraction of authority given up at the AoA limit */
+
+/* The real aircraft rolls on differential stabilator as well as the
+   ailerons - NASA TP-1538 table I lists +-5.375 deg per surface for it,
+   alongside the +-21.5 deg of the ailerons. Driven off the same roll rate
+   error, with its gain set so both effectors reach their own stop together:
+   ROLL_P is deg of aileron per deg/s of error, and this is that same
+   deg/s of error scaled down by how much less travel the stabilator has to
+   give. */
+const STAB_DIFF_P = ROLL_P * (SimulationConstants.ELEVATOR_DIFF_MAX / SimulationConstants.AILERON_MAX)
 
 /* Yaw channel. The washout is what stops the damper from fighting a steady
    turn: it only passes the changing part of the yaw rate, so a sustained turn
@@ -132,6 +163,7 @@ export default class FlightControlSystem {
     this.commands = {
       throttle: 0,
       elevator: SimulationConstants.ELEVATOR_TRIM,
+      stabilatorDiff: 0,
       aileron: SimulationConstants.AILERON_TRIM,
       rudder: 0,
       lef: 0,
@@ -282,6 +314,15 @@ export default class FlightControlSystem {
        the small standing deflection the airframe asymmetry calls for is what
        the aileron trim constant is for. */
     this.commands.aileron = SimulationConstants.AILERON_TRIM - ROLL_P * (pCommand - p) * lateralScale
+
+    /* Same rate error, same sign convention - positive is a differential
+       deflection that rolls left, matching the aileron above so the two
+       effectors add rather than fight. No trim term: unlike the ailerons,
+       an asymmetric stabilator has nothing to trim out, since it is the
+       symmetric elevator command that carries any standing pitch trim. Left
+       unclamped here, same as the aileron above - the actuator model is
+       where travel limits are enforced. */
+    this.commands.stabilatorDiff = -STAB_DIFF_P * (pCommand - p) * lateralScale
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
        yaw: damper, turn coordination, interconnect

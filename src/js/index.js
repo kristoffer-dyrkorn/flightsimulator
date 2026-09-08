@@ -125,7 +125,7 @@ cameras.push(camera.clone())
 cameras.push(camera.clone())
 
 const externalCameraPosition = {
-  distance: 50,
+  distance: 30,
   compass: 0,
   compassSpeed: 0,
   inclination: 90,

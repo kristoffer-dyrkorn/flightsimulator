@@ -28,6 +28,11 @@ SimulationConstants.ELEVATOR_MAX = 25
 
 SimulationConstants.ELEVATOR_TRIM = -1.5
 
+// differential deflection between the two stabilators, on top of the
+// symmetric elevator command - the real roll effector alongside the
+// ailerons, per NASA TP-1538 table I ("Differential (delta_d), per surface")
+SimulationConstants.ELEVATOR_DIFF_MAX = 5.375
+
 SimulationConstants.RUDDER_MIN = -30
 SimulationConstants.RUDDER_MAX = 30
 

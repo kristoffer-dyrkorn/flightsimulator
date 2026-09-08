@@ -158,6 +158,7 @@ export default class F16Simulation {
     const T = this.engineModel.thrust
     const el = u.elevator
     const ail = u.aileron
+    const stabDiff = u.stabilatorDiff
     const rud = u.rudder
     const spbr = u.speedbrake
 
@@ -167,6 +168,17 @@ export default class F16Simulation {
     const drud = rud / SimulationConstants.RUDDER_MAX /* rudder normalized against max angle */
     const dlef = 1 - lef / SimulationConstants.LEF_MAX /* leading edge flap normalized against max angle */
     const dspbr = spbr / SimulationConstants.SPEEDBRAKE_MAX /* speed brake normalized against max angle */
+
+    /* The stabilator is two independent surfaces, not one - el is their
+       average, and stabDiff is how far apart they are, so left and right
+       each get their own deflection. Left gets less lift for a positive
+       differential, right gets more: that is what rolls the aircraft left,
+       matching the sign convention the ailerons already use. Each side is
+       still limited to what a real panel can move, even when a symmetric
+       command near its own limit leaves no room left for the differential
+       on top of it. */
+    const elLeft = this.limit(el - stabDiff, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
+    const elRight = this.limit(el + stabDiff, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
 
     xd.pow = this.engineModel.dpow
 
@@ -179,7 +191,23 @@ export default class F16Simulation {
     /* altdot - altitude is up, the matrix row is down, hence the sign flip */
     xd.alt = -(r20 * U + r21 * V + r22 * W)
 
-    const [Cx, Cz, Cm, Cy, Cn, Cl] = hifi_C(alpha, beta, el)
+    /* hifi_C is a function of one elevator deflection because the tunnel
+       data behind it is - the tail was tested moving as a unit. Averaging
+       its output for the two actual deflections is the natural way to
+       extend that to a differential command: at stabDiff = 0 it collapses
+       back to the single call this replaces, and asymmetric deflections
+       pick up whatever elevator-dependent rolling and yawing moment the
+       table already carries, on each side, rather than none at all. */
+    const [CxL, CzL, CmL, CyL, CnL, ClL] = hifi_C(alpha, beta, elLeft)
+    const [CxR, CzR, CmR, CyR, CnR, ClR] = hifi_C(alpha, beta, elRight)
+
+    const Cx = 0.5 * (CxL + CxR)
+    const Cz = 0.5 * (CzL + CzR)
+    const Cm = 0.5 * (CmL + CmR)
+    const Cy = 0.5 * (CyL + CyR)
+    const Cn = 0.5 * (CnL + CnR)
+    const Cl = 0.5 * (ClL + ClR)
+
     const [Cxq, Cyr, Cyp, Czq, Clr, Clp, Cmq, Cnr, Cnp] = hifi_damping(alpha)
     const [delta_Cx_lef, delta_Cz_lef, delta_Cm_lef, delta_Cy_lef, delta_Cn_lef, delta_Cl_lef] = hifi_C_lef(
       alpha_lef,
@@ -200,7 +228,14 @@ export default class F16Simulation {
     const [delta_Cy_a20, delta_Cy_a20_lef, delta_Cn_a20, delta_Cn_a20_lef, delta_Cl_a20, delta_Cl_a20_lef] =
       hifi_ailerons(alpha, alpha_lef, beta)
 
-    const [delta_Cnbeta, delta_Clbeta, delta_Cm, eta_el, delta_Cm_ds] = hifi_other_coeffs(alpha, el)
+    const [delta_CnbetaL, delta_ClbetaL, delta_CmL2, eta_elL, delta_Cm_dsL] = hifi_other_coeffs(alpha, elLeft)
+    const [delta_CnbetaR, delta_ClbetaR, delta_CmR2, eta_elR, delta_Cm_dsR] = hifi_other_coeffs(alpha, elRight)
+
+    const delta_Cnbeta = 0.5 * (delta_CnbetaL + delta_CnbetaR)
+    const delta_Clbeta = 0.5 * (delta_ClbetaL + delta_ClbetaR)
+    const delta_Cm = 0.5 * (delta_CmL2 + delta_CmR2)
+    const eta_el = 0.5 * (eta_elL + eta_elR)
+    const delta_Cm_ds = 0.5 * (delta_Cm_dsL + delta_Cm_dsR)
 
     const delta_Cx_spbr_alpha = _CXspbr(alpha)
     const delta_Cz_spbr_alpha = _CZspbr(alpha)

@@ -17,7 +17,12 @@ import { Group, Vector3, MathUtils } from "three"
  *                              geometry (nothing marks the real actuator
  *                              attachment) - it is estimated at 38% of the
  *                              root chord aft of the leading edge, a typical
- *                              location for an all-moving tail's pivot.
+ *                              location for an all-moving tail's pivot. The
+ *                              two stabilators move independently - `diff`
+ *                              adds the differential roll command on top of
+ *                              the symmetric one, same as the physics model
+ *                              (f16simulation.js) does when it evaluates the
+ *                              tail's aerodynamics per side.
  *   aileron (AileronR/L01)     these are trailing-edge surfaces, so they
  *                              hinge on their own leading edge - the straight
  *                              swept line the mesh's front two corners at
@@ -26,11 +31,14 @@ import { Group, Vector3, MathUtils } from "three"
  *                              own trailing edge - same construction as the
  *                              aileron, front swapped for back.
  *   rudder (RudderL01)         hinges on its own leading edge, root to tip.
- *   speedbrake                 BrakeR01+BrakeR02 turned out (see prior
- *                              analysis) to be the top and bottom skin of one
- *                              closed door, not two separate panels - they
- *                              pivot together as a rigid pair, about the
- *                              front edge they share. Same for BrakeL01/L02.
+ *   speedbrake                 a real clamshell pair per side: BrakeR01 (the
+ *                              top panel) and BrakeR02 (the bottom panel)
+ *                              share a hinge line along the front edge of the
+ *                              cutout, and meet flush along a knife edge at
+ *                              the back when closed - which is why they share
+ *                              so many vertices - but they open in opposite
+ *                              senses about that same hinge, top swinging up
+ *                              and bottom swinging down. Same for BrakeL01/L02.
  *
  * `sign` flips the actuator angle where the axis chosen here - always
  * "root/inner corner pointing to tip/outer corner" - happens to put a
@@ -41,8 +49,11 @@ import { Group, Vector3, MathUtils } from "three"
 
 const HINGES = {
   elevator: [
-    { mesh: "ElevatorR01", point: [-1.0825, 1.657, -5.548], axis: [1, 0, 0], sign: -1 },
-    { mesh: "ElevatorL01", point: [1.0825, 1.657, -5.548], axis: [1, 0, 0], sign: -1 },
+    // diff: right gets more (down-)deflection, left gets less - see the
+    // comment above elLeft/elRight in f16simulation.js for why that is the
+    // combination that rolls left for a positive differential
+    { mesh: "ElevatorR01", point: [-1.0825, 1.657, -5.548], axis: [1, 0, 0], sign: -1, diff: 1 },
+    { mesh: "ElevatorL01", point: [1.0825, 1.657, -5.548], axis: [1, 0, 0], sign: -1, diff: -1 },
   ],
   aileron: [
     { mesh: "AileronR01", point: [-1.0855, 1.629, -2.734], axis: [-2.5629, -0.02, -0.3885], sign: 1 },
@@ -54,18 +65,13 @@ const HINGES = {
   ],
   rudder: [{ mesh: "RudderL01", point: [0, 2.7924, -5.6267], axis: [0, 1.9664, -1.2838], sign: 1 }],
   speedbrake: [
-    {
-      meshes: ["BrakeR01", "BrakeR02"],
-      point: [-0.8904, 1.6987, -5.8841],
-      axis: [0.3674, 0.0697, -0.0013],
-      sign: 1,
-    },
-    {
-      meshes: ["BrakeL01", "BrakeL02"],
-      point: [0.8904, 1.6987, -5.8841],
-      axis: [-0.3674, 0.0697, -0.0013],
-      sign: -1,
-    },
+    // right side: top panel opens up, bottom panel opens down, both about
+    // the same hinge line - not a rigid pair
+    { mesh: "BrakeR01", point: [-0.8904, 1.6987, -5.8841], axis: [0.3674, 0.0697, -0.0013], sign: 1 },
+    { mesh: "BrakeR02", point: [-0.8904, 1.6987, -5.8841], axis: [0.3674, 0.0697, -0.0013], sign: -1 },
+    // left side, mirrored
+    { mesh: "BrakeL01", point: [0.8904, 1.6987, -5.8841], axis: [-0.3674, 0.0697, -0.0013], sign: -1 },
+    { mesh: "BrakeL02", point: [0.8904, 1.6987, -5.8841], axis: [-0.3674, 0.0697, -0.0013], sign: 1 },
   ],
 }
 
@@ -109,6 +115,7 @@ export default class ControlSurfaceRig {
           pivot,
           axis: new Vector3(...entry.axis).normalize(),
           sign: entry.sign,
+          diff: entry.diff ?? 0,
         })
       }
     }
@@ -119,8 +126,9 @@ export default class ControlSurfaceRig {
    *                    control surface positions, in degrees
    */
   update(actuators) {
-    for (const { channel, pivot, axis, sign } of this.pivots) {
-      pivot.setRotationFromAxisAngle(axis, sign * actuators[channel] * MathUtils.DEG2RAD)
+    for (const { channel, pivot, axis, sign, diff } of this.pivots) {
+      const deg = actuators[channel] + diff * actuators.stabilatorDiff
+      pivot.setRotationFromAxisAngle(axis, sign * deg * MathUtils.DEG2RAD)
     }
   }
 }

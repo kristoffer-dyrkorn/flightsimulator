@@ -40,6 +40,15 @@ const SURFACES = [
     max: SimulationConstants.ELEVATOR_MAX,
   },
   {
+    // same physical stabilator actuators as elevator above, just commanded
+    // to split rather than move together - same bandwidth, own travel limit
+    name: "stabilatorDiff",
+    rate: 60,
+    tau: 1 / 20.2,
+    min: -SimulationConstants.ELEVATOR_DIFF_MAX,
+    max: SimulationConstants.ELEVATOR_DIFF_MAX,
+  },
+  {
     name: "aileron",
     rate: 80,
     tau: 1 / 20.2,
@@ -79,6 +88,7 @@ export default class ActuatorModel {
   constructor() {
     /* actual control positions, degrees */
     this.elevator = SimulationConstants.ELEVATOR_TRIM
+    this.stabilatorDiff = 0
     this.aileron = SimulationConstants.AILERON_TRIM
     this.rudder = 0
     this.lef = 0
