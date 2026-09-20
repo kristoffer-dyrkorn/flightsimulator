@@ -168,6 +168,9 @@ export default class FlightControlSystem {
       rudder: 0,
       lef: 0,
       speedbrake: 0,
+      gear: 0,
+      brake: 0,
+      noseSteer: 0,
     }
 
     /* The pitch integrator ends up holding the stabilator deflection needed to
@@ -365,6 +368,34 @@ export default class FlightControlSystem {
     )
 
     this.commands.throttle = input.throttle
-    this.commands.speedbrake = input.speedbrake
+
+    /* Interlocked with the gear the same way JSBSim's F-16 model schedules
+       it (fcs/speedbrake-scheduler, gear/gear-cmd-norm): full 60 degrees of
+       travel with the gear up, capped to SPEEDBRAKE_MAX_GEAR_DOWN with it
+       down, interpolated the same way over anything in between. The pilot's
+       own lever position (input.speedbrake) is left alone - only what gets
+       commanded to the actuator is capped, so nothing has to happen when
+       the gear moves except this limit sliding, exactly as if the pilot
+       were still holding the board wherever they put it. */
+    const speedbrakeMax =
+      SimulationConstants.SPEEDBRAKE_MAX +
+      (SimulationConstants.SPEEDBRAKE_MAX_GEAR_DOWN - SimulationConstants.SPEEDBRAKE_MAX) * input.gear
+    this.commands.speedbrake = limit(input.speedbrake, SimulationConstants.SPEEDBRAKE_MIN, speedbrakeMax)
+    this.commands.gear = input.gear
+
+    /* Wheel brakes are a pass-through lever like the speedbrake and
+       throttle above - there's no computer between the pedal and the
+       brake, just the actuator's own hydraulic lag (see actuatormodel.js). */
+    this.commands.brake = input.brake
+
+    /* Nosewheel steering, driven off the same rudder pedals as the rudder
+       command above - the real aircraft's pedal-steering mode works exactly
+       this way, one input feeding both the rudder in the air and the
+       nosewheel on the ground, rather than a separate control. Left
+       unconditional here: landinggearmodel.js only turns this into an
+       actual force while the nose leg is in contact with the ground, which
+       is the same thing as "weight on the nose gear" - there's no need to
+       gate it a second time here. */
+    this.commands.noseSteer = input.yawPedal * SimulationConstants.NOSEWHEEL_STEER_MAX
   }
 }

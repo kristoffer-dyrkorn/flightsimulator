@@ -9,7 +9,9 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 ## Main features
 
 - Realistic visualisation of all of mainland Norway
-- Reasonably accurate flight model of an F-16
+- Reasonably accurate aerodynamic model of an F-16
+- Flight control system (FCS) for realistic fly-by-wire controls
+- Landing on runways is supported
 - Internal and external views
 - Synthesized, dynamic engine sound
 - Joystick support (only tested in Chrome, using an NXT Gladiator)
@@ -20,7 +22,7 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 
 Use the keyboard or, if you have, an NXT Gladiator joystick.
 
-Arrow keys: stick control. This simulator has a flight control system (FCS), so you do not steer the aircraft directly. The FCS decides how the control surfaces should move to make the aircraft do what you want. `z` and `x`: rudder pedals. `q` and `a`: throttle. Space bar cycles camera views: cockpit / wingman camera / external camera. For the external camera, `j` and `l` rotates the camera left and right, `i` and `k` rotates it up and down. Use `,` and `.` to move the camera nearer/further away. Use `h` to toggle HUD on and off.
+Arrow keys: stick control. This simulator has a flight control system (FCS), so you do not steer the aircraft directly. The FCS decides how the control surfaces should move to make the aircraft do what you want. `z` and `x`: rudder pedals. `q` and `a`: throttle. Space bar cycles camera views: cockpit / wingman camera / external camera. For the external camera, `j` and `l` rotates the camera left and right, `i` and `k` rotates it up and down. Use `,` and `.` to move the camera nearer/further away. Use `h` to toggle HUD on and off. `1` and `2`: decrease/increase air brakes. `g` extends/retracts landing gears. `b` turns on wheel brakes when rolling on a runway.
 
 ## Screenshots
 
@@ -35,6 +37,8 @@ Arrow keys: stick control. This simulator has a flight control system (FCS), so 
 September 2026:
 
 - Added von Kármán wind turbulence model
+- Added landing gears and updated the aerodynamic model so gear drag is correctly modelled
+- Added support for landing on all of Norway's runways except Sola / Stavanger. Sola could not be included since the PDF containing the official Avinor runway documentation could not be parsed - and thus the runway geometries and coordinates there could not be extracted.
 
 August 2026:
 
@@ -42,7 +46,7 @@ August 2026:
 - Now calculates the compass direction correctly
 - Decoupled the physics loop from the rendering loop to avoid large time steps (and instability)
 - Fixed leading edge flap calculations (typo in variable name)
-- Fixed wrong data in speed brake aerodynamic table and enabled speed brakes
+- Fixed wrong data in speed brake aerodynamic table and enabled air brakes
 - Fixed bug in flight path indicator placement
 - Fixed limitations in the atmospheric model for high altitudes
 - Fixed aircraft jitter when using the chase camera
@@ -92,7 +96,7 @@ April 2021:
   - "NASA Technical Paper 1538", Nguyen, L.T. et al., 1979
   - "NASA Technical Note D-8176", Gilbert at al, 1976
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
-- 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html
+- 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html, the landing gears from https://rigmodels.com/model.php?view=F-16_Fighting_Falcon_Jet_Fighter_Aircraft-3d-model__81ac66f8ec544649927fb2fc0e44fba1
 - The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
 
 ## License

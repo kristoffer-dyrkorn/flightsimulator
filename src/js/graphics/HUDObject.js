@@ -16,6 +16,25 @@ export default class HUDObject {
     this.ctx.textBaseline = "middle"
     this.ctx.fillStyle = "#20ff40"
     this.ctx.strokeStyle = "#20ff40"
+
+    // raw sink rate is a per-step derivative and jitters between frames -
+    // smoothed for display by averaging over a trailing 1 second window,
+    // { time, value } samples, oldest first
+    this.sinkRateSamples = []
+  }
+
+  // trailing 1 second average of the raw sink rate, for a HUD readout that
+  // does not jitter between frames the way the underlying derivative does
+  smoothedSinkRate(sinkRate) {
+    const now = performance.now()
+    this.sinkRateSamples.push({ time: now, value: sinkRate })
+
+    while (this.sinkRateSamples[0].time <= now - 1000) {
+      this.sinkRateSamples.shift()
+    }
+
+    const total = this.sinkRateSamples.reduce((sum, sample) => sum + sample.value, 0)
+    return total / this.sinkRateSamples.length
   }
 
   /**
@@ -46,6 +65,11 @@ export default class HUDObject {
     this.aoa = airplaneState.alpha
 
     this.g = airplaneState.nz
+
+    this.sinkRateText = (100 * Math.round(this.smoothedSinkRate(airplaneState.sinkRate) / 100)).toLocaleString(
+      undefined,
+      { maximumFractionDigits: 0 },
+    )
   }
 
   getTextBoundingBox(text) {

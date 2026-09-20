@@ -6,7 +6,7 @@ import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
 const url = new URL(document.location)
 const urlParams = url.searchParams
 
-const SERVER = urlParams.has("local") ? "" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
+export const SERVER = urlParams.has("local") ? "" : "https://s3-eu-west-1.amazonaws.com/kd-flightsim"
 
 export default class Tile {
   constructor(scene, terrain, tileExtents, lowerLeft) {
@@ -76,10 +76,22 @@ export default class Tile {
 
       this.loaded = false
       Tile.loadCount--
+
+      // this tile's runway polygons, if it had any, no longer apply -
+      // drop them from the dynamic list the same way the mesh itself is
+      // dropped, so a plane never lands using a runway from ground that
+      // isn't actually loaded any more
+      this.terrain.runways.unload(this.tileName)
     }
   }
 
   load() {
+    // runway legality data is a sidecar file, independent of the GLB/KTX2
+    // below - most tiles don't have one, and that's fine (see runways.js).
+    // Requested up front rather than after the mesh load succeeds, so it's
+    // in place as early as the rest of this tile's data.
+    this.terrain.runways.load(this.tileName)
+
     Tile.gltfLoader.load(
       `${SERVER}/glb50/${this.tileName}.glb`,
       (gltf) => {

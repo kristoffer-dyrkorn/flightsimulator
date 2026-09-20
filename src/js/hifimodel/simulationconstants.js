@@ -9,7 +9,7 @@ SimulationConstants.ALTITUDE_MAX = 50000
 SimulationConstants.MACH_MIN = 0.0
 
 // throttle setting, fraction
-SimulationConstants.THROTTLE_MIN = 0.1
+SimulationConstants.THROTTLE_MIN = 0.0
 SimulationConstants.THROTTLE_MAX = 1.0
 
 // engine power state, percent
@@ -46,6 +46,76 @@ SimulationConstants.LEF_MAX = 25
 
 SimulationConstants.SPEEDBRAKE_MIN = 0
 SimulationConstants.SPEEDBRAKE_MAX = 60
+
+// JSBSim's F-16 model (aircraft/f16/f16.xml, fcs/speedbrake-scheduler) scales
+// commanded speedbrake by a gain scheduled on gear position: 1.0 with the
+// gear up, 0.71667 with it down - i.e. the same 60 degrees of travel is
+// capped to about 43 with the gear extended. See flightcontrolsystem.js,
+// where this interpolates by the pilot's own gear command the same way
+// JSBSim's table does (gear/gear-cmd-norm, not the slower-moving actuator
+// position).
+SimulationConstants.SPEEDBRAKE_MAX_GEAR_DOWN = 43
+
+// landing gear: 0 = up/retracted, 1 = down/extended. Neither number comes
+// from tunnel data or a real transition-time spec - both are estimates for
+// a fighter-sized aircraft's gear.
+SimulationConstants.GEAR_TRANSITION_TIME = 6 // seconds for a full up/down cycle
+
+/* GEAR_DRAG, added zero-lift drag coefficient at full extension. JSBSim's
+   F-16 model (github.com/JSBSim-Team/jsbsim, aircraft/f16/f16.xml) carries
+   an aero/coefficient/CDgear function of exactly this shape - a flat CD
+   times qbar times wing area, scaled by gear position - with a coefficient
+   of 0.0270, and its <metrics> block uses the same wing area, span, and
+   chord this simulation does (300 sq ft, 30 ft, 11.32 ft - both ultimately
+   from the same Stevens & Lewis / NASA TP-1538 data), so that number
+   applies here with no unit conversion. Two earlier estimates - 0.02 from
+   memory of textbook ranges, then 0.01 from a drag-area buildup off this
+   aircraft's own gear geometry - both undershot a real F-16 model's own
+   figure, the drag-area one by nearly 3x, which given how approximate a
+   bluff-body Cd guess is for an unfaired strut+wheel is not a surprising
+   miss. */
+SimulationConstants.GEAR_DRAG = 0.027
+
+/* Wheel brakes, main gear only - the F-16's nosewheel is steered, not
+   braked. BRAKE_FRICTION_COEFF_MAX is a typical dry-pavement aircraft brake
+   friction coefficient at the anti-skid limit (published ranges run
+   roughly 0.3-0.5); full pedal application blends the main gear's rolling
+   friction, in landinggearmodel.js, up from its unbraked coefficient to
+   this one. */
+SimulationConstants.BRAKE_FRICTION_COEFF_MAX = 0.4
+
+/* Nosewheel steering authority available from the rudder pedals alone (the
+   real system's "low gain"/pedal-steering mode). The real aircraft also has
+   a much larger-throw, handle-operated "high gain" mode for tight ground
+   manoeuvring, which isn't modeled here since there's no separate control
+   for it - this is an estimate for pedal-only authority, not a published
+   figure. */
+SimulationConstants.NOSEWHEEL_STEER_MAX = 6 // degrees
+
+/* Ground-contact detection (index.js's collision check) - how a gear-down
+   touch is told apart from a crash. There's no structural gear model yet
+   (see the landing plan this came out of), so these don't decide how the
+   aircraft *behaves* on contact, only whether contact ends the flight.
+
+   GEAR_CONTACT_CLEARANCE is in meters, not feet like the rest of this file -
+   it's consumed directly by a raycast against the terrain mesh, which is
+   built in meters, and converting it back and forth to match the rest of
+   this file would just add a conversion for no benefit. A wheel's own
+   raycast origin sits at its hub, roughly a wheel radius above where the
+   tire would actually touch (the main wheels are about 0.65 m in diameter),
+   so this needs to be at least that, with a little more for the tire's own
+   compression and to trigger the check slightly before the wheel is
+   already through the ground rather than after.
+
+   MAX_SAFE_SINK_RATE and MAX_SAFE_BANK are both estimates, not specs pulled
+   from anywhere - a fighter's gear is commonly designed for something on
+   the order of 600 ft/min at touchdown, and any real bank at contact drags a
+   wingtip or store before the far main gear even arrives, so both are set
+   with real margin under where actual damage would plausibly start rather
+   than tuned to a source. */
+SimulationConstants.GEAR_CONTACT_CLEARANCE = 0.5 // m
+SimulationConstants.MAX_SAFE_SINK_RATE = 600 // ft/min
+SimulationConstants.MAX_SAFE_BANK = 7 // degrees
 
 // FCS limits to G, alpha and roll
 SimulationConstants.NZ_MAX = 9.0

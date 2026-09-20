@@ -14,14 +14,16 @@ import {
   CanvasTexture,
   Mesh,
   MathUtils,
-  LoadingManager,
   Ray,
   Vector3,
+  Quaternion,
+  LoadingManager,
 } from "three"
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js"
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js"
+import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
-import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
+import InputVector, { STICK_STEP, THROTTLE_STEP, BRAKE_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
 import FlightControlSystem from "./hifimodel/models/flightcontrolsystem.js"
 import RungeKutta4 from "./hifimodel/integrator.js"
@@ -29,6 +31,7 @@ import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
 import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
+import LandingGearRig from "./graphics/landingGearRig.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
@@ -81,9 +84,42 @@ let heightAboveGround = 0
 let gamepad = null
 let engineSound = null
 let controlSurfaceRig = null
+let landingGearRig = null
+
+// the pilot's commanded gear position - up/down, instant, exactly like a
+// real gear handle - not the actual gear position. That's
+// controlActuators.gear, rate-limited to a real transition time (see
+// ActuatorModel's own comment) and what both the aerodynamic model's gear
+// drag and landingGearRig's visual animation actually ride on. This one is
+// still what landing-legality checks below care about (a real pilot is
+// judged on when they moved the handle, not on the hydraulics catching
+// up), and it's what the "g" key toggles. Starts up, matching the sim's
+// own starting state (airborne, not parked).
+let gearDown = false
+
+// true once the aircraft has been judged down safely and is rolling on the
+// ground, rather than still flying - see the ground collision check below.
+// Persists across ticks so a landing, once judged safe, isn't re-litigated
+// every 200ms against criteria (sink rate, bank, being over a mapped
+// runway polygon) that only mean something at the instant of touchdown -
+// a taxiing aircraft bumping over an uneven surface shouldn't have to
+// re-earn its landing every fifth of a second. Cleared the moment the
+// wheels lift clear of the ground again, so a bounce, a go-around, or a
+// subsequent takeoff all require a fresh safe touch of their own.
+let onGround = false
+
+// hard pause - freezes physics, camera motion, terrain streaming, and
+// rendering entirely (drawScene below returns immediately once this is
+// set, before touching any of them). previousFrameTime keeps advancing
+// with the wall clock regardless, so the frame right after unpausing sees
+// a normal small frameTime rather than the whole paused duration landing
+// on the simulation in one burst.
+let paused = false
 
 // ray for intersection testing with ground, direction is in GLB coordinates (y up)
 const interSectionRay = new Ray(new Vector3(0, 0, 0), new Vector3(0, -1, 0))
+const wheelWorldPosition = new Vector3()
+const closestWheelWorldPosition = new Vector3()
 
 const canvas = document.getElementById("webgl")
 const renderer = new WebGLRenderer({ canvas: canvas, antialias: true })
@@ -257,8 +293,158 @@ setInterval(() => {
   )
 }, 60000)
 
+// how far straight down it is to the terrain surface below a world position
+// (in the scene's own UTM33-meters coordinates), or null if the tile
+// underneath it hasn't loaded yet
+function terrainClearanceBelow(worldPosition) {
+  const tileXOffset = (worldPosition.x - MINX) % TILE_EXTENTS
+  const x = Math.round(worldPosition.x - tileXOffset)
+
+  const tileYOffset = (worldPosition.y - MINY) % TILE_EXTENTS
+  const y = Math.round(worldPosition.y - tileYOffset)
+
+  const tile = terrain.tiles.get(`${x}-${y}`)
+  if (!tile || !tile.loaded) return null
+
+  // set ray origin to the query position, in the tile's own local
+  // coordinates, and convert from z up to the GLB's y up
+  interSectionRay.origin.set(tileXOffset, worldPosition.z, -tileYOffset)
+
+  const hit = tile.tileMesh.geometry.boundsTree.raycastFirst(interSectionRay)
+  return hit ? hit.distance : null
+}
+
+// whether a world position (in the scene's own UTM33-meters coordinates)
+// falls inside a runway polygon for the tile underneath it - see runways.js.
+// tileXOffset/tileYOffset are already the tile-local UTM33 coordinates the
+// runway geojson itself is authored in, so no conversion is needed beyond
+// the same tile-snap arithmetic terrainClearanceBelow above uses.
+function isPositionOnRunway(worldPosition) {
+  const tileXOffset = (worldPosition.x - MINX) % TILE_EXTENTS
+  const x = Math.round(worldPosition.x - tileXOffset)
+
+  const tileYOffset = (worldPosition.y - MINY) % TILE_EXTENTS
+  const y = Math.round(worldPosition.y - tileYOffset)
+
+  return terrain.runways.isInsideRunway(`${x}-${y}`, tileXOffset, tileYOffset)
+}
+
+// Every parameter that decides whether a touchdown right now would be
+// judged a safe landing, read fresh each call - shared by the crash check
+// below and the periodic landing-status log, so both are always looking at
+// exactly the same numbers.
+//
+// The wheels themselves never move (the gear rig is a visibility toggle,
+// not an animated one - see landingGearRig.js), so closestWheelClearance is
+// always where they'd be if extended, whether gear is down or not; that's
+// what lets a gear-up approach still read as "close to the ground" here
+// without it being mistaken for a real touch anywhere this is used.
+function evaluateLandingConditions() {
+  const wheels = landingGearRig?.wheels
+  let closestWheelClearance = Infinity
+
+  if (wheels) {
+    for (const wheel of [wheels.nose, wheels.left, wheels.right]) {
+      if (!wheel) continue
+
+      const clearance = terrainClearanceBelow(wheel.getWorldPosition(wheelWorldPosition))
+      if (clearance !== null && clearance < closestWheelClearance) {
+        closestWheelClearance = clearance
+        closestWheelWorldPosition.copy(wheelWorldPosition)
+      }
+    }
+  }
+
+  return {
+    hasWheels: !!wheels,
+    closestWheelClearance,
+    wheelsNearGround: closestWheelClearance < SimulationConstants.GEAR_CONTACT_CLEARANCE,
+    gearDown,
+    sinkRate: airplaneState.sinkRate, // ft/min, positive = descending
+    bank: Math.abs(airplaneState.phi * SimulationConstants.RTOD), // deg
+    onRunway: wheels ? isPositionOnRunway(closestWheelWorldPosition) : false,
+  }
+}
+
+// Which of evaluateLandingConditions()'s parameters, if any, would turn a
+// touch right now into a crash rather than a landing - the same conditions
+// safeTouch below checks, just spelled out individually so a crash can say
+// what was actually wrong instead of just that one happened.
+function landingFailureReasons(status) {
+  const reasons = []
+
+  if (!status.gearDown) reasons.push("landing gear is up")
+  if (status.sinkRate >= SimulationConstants.MAX_SAFE_SINK_RATE) {
+    reasons.push(`sink rate too high (${status.sinkRate.toFixed(1)} ft/min, max ${SimulationConstants.MAX_SAFE_SINK_RATE})`)
+  }
+  if (status.bank >= SimulationConstants.MAX_SAFE_BANK) {
+    reasons.push(`bank too steep (${status.bank.toFixed(1)} deg, max ${SimulationConstants.MAX_SAFE_BANK})`)
+  }
+  if (!status.onRunway) reasons.push("not over a mapped runway")
+
+  return reasons
+}
+
+// Landing-readiness telemetry, printed every 0.5 s while the aircraft is
+// airborne (once down and rolling, there's nothing left to preview) - the
+// same parameters the crash check below judges a touchdown by, so the
+// console shows exactly what would happen if the aircraft touched down
+// right now, continuously, rather than only finding out after the fact.
+setInterval(() => {
+  if (paused || onGround) return
+
+  const status = evaluateLandingConditions()
+  const reasons = landingFailureReasons(status)
+
+  console.log(
+    "Landing check: gear %s | sink rate %s ft/min (max %s) | bank %s deg (max %s) | wheel clearance %s m (need < %s) | over runway: %s -> %s",
+    status.gearDown ? "down" : "up",
+    status.sinkRate.toFixed(1),
+    SimulationConstants.MAX_SAFE_SINK_RATE,
+    status.bank.toFixed(1),
+    SimulationConstants.MAX_SAFE_BANK,
+    Number.isFinite(status.closestWheelClearance) ? status.closestWheelClearance.toFixed(1) : "-",
+    SimulationConstants.GEAR_CONTACT_CLEARANCE,
+    status.onRunway ? "yes" : "no",
+    reasons.length === 0 ? "would be a safe landing" : "would crash right now (" + reasons.join(", ") + ")",
+  )
+}, 500)
+
 // check for ground collision every 200 ms
 setInterval(() => {
+  if (paused) return
+
+  const status = evaluateLandingConditions()
+
+  // Airborne again - a bounce, a go-around, or a subsequent takeoff. The
+  // next touch has to earn its own safe landing rather than inheriting
+  // this one's.
+  if (onGround && !status.wheelsNearGround) {
+    onGround = false
+    console.log("Airborne - landing conditions will be re-checked on next touch")
+  }
+
+  // Not yet down: a gear-down touch with a sane sink rate and wings level,
+  // over mapped runway ground, is a landing rather than a crash - judged
+  // once, right here, at the instant the wheels reach the ground. See
+  // runways.js for how "over mapped runway ground" is tracked.
+  if (!onGround && status.wheelsNearGround) {
+    const reasons = landingFailureReasons(status)
+
+    if (reasons.length === 0) {
+      onGround = true
+      console.log("Landed - rolling on the ground")
+    } else {
+      // the wheels are already within GEAR_CONTACT_CLEARANCE of the
+      // ground - effectively touching - without satisfying what makes a
+      // touch safe. That's the crash: wrong attitude, too hard a sink,
+      // gear still up, or simply not over mapped runway ground.
+      console.log("Crash: unsafe touchdown - %s", reasons.join(", "))
+      document.location.href = "collision.html"
+      return
+    }
+  }
+
   // get the coordinates of the tile surrounding the camera
   const tileXOffset = (camera.position.x - MINX) % TILE_EXTENTS
   const x = Math.round(camera.position.x - tileXOffset)
@@ -269,11 +455,7 @@ setInterval(() => {
   // get the tile
   const tile = terrain.tiles.get(`${x}-${y}`)
   if (tile.loaded) {
-    const cameraElevation = camera.position.z * SimulationConstants.FEET_TO_METERS
     const tileGeometry = tile.tileMesh.geometry
-
-    // in the GLB, y is up, so read max y to get max elevation
-    const maxElevationInTile = tileGeometry.boundingBox.max.y
 
     // set ray origin to the camera position
     // use relative coordinates inside the tile to match the geometry's coordinates
@@ -283,12 +465,47 @@ setInterval(() => {
     // cast a ray from the camera position and straight down towards the terrain
     const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
 
-    // flag collision if we were too low or there was no hit (we were under the surface)
-    if (!hit || hit.distance < 4) {
-      document.location.href = "collision.html"
-    } else {
+    // Ground height tracking runs unconditionally, on- or off-ground alike:
+    // the aircraft keeps moving over (and needing an accurate reading of)
+    // the terrain surface throughout a landing roll, not just up to the
+    // moment of touchdown, so this can no longer live behind the crash
+    // check below the way it used to when a safe touch just ended the tick
+    // early.
+    if (hit) {
       // register height above ground, for general use
       heightAboveGround = hit.distance
+
+      // terrain elevation directly below the aircraft, for the landing gear
+      // model's ground reaction - cached here rather than recomputed from
+      // the aircraft's own (fast-changing, mid-descent) altitude each
+      // physics step, since the ground's elevation doesn't move with the
+      // aircraft and this 200ms-updated reading is the only terrain height
+      // available anyway
+      f16simulation.landingGearModel.groundAlt = (camera.position.z - hit.distance) * SimulationConstants.METERS_TO_FEET
+    }
+
+    // No ground found at all directly below the aircraft - off the edge of
+    // loaded terrain, or already under the mesh - is always a crash,
+    // whatever state the landing gear is in.
+    if (!hit) {
+      console.log("Crash: no terrain found directly below the aircraft (off the edge of loaded terrain, or already under the surface)")
+      document.location.href = "collision.html"
+      return
+    }
+
+    // The distance-from-camera "too low" check below is a coarse backstop
+    // for when there's no wheel telemetry yet (landingGearRig hasn't
+    // loaded) - once there is, the wheel-based check above already covers
+    // this, more precisely (GEAR_CONTACT_CLEARANCE, not an arbitrary 4 m)
+    // and more completely (three sample points under nose and both main
+    // gear, not one under the camera). Left as-is here, this threshold is
+    // measured from the CG, which sits a good 1.7-1.8 m above the wheels
+    // (see landinggearmodel.js's LEGS) - it would fire on every ordinary
+    // approach, well before the wheels themselves ever got close enough to
+    // register a safe touchdown at all.
+    if (!status.hasWheels && hit.distance < 4) {
+      console.log("Crash: too close to terrain (%s m) with no landing gear telemetry yet", hit.distance.toFixed(1))
+      document.location.href = "collision.html"
     }
   }
 }, 200)
@@ -315,6 +532,8 @@ function drawScene(currentFrametime) {
 
   let frameTime = currentFrametime - previousFrameTime || 0
   previousFrameTime = currentFrametime
+
+  if (paused) return
 
   if (gamepad) {
     gamepad.read(airplaneControlInput)
@@ -355,6 +574,14 @@ function drawScene(currentFrametime) {
   renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
   renderState.updateAircraftModel(f16)
   controlSurfaceRig?.update(controlActuators)
+
+  // controlActuators.gear is the same rate-limited 0..1 actuator position
+  // the aerodynamic model's gear drag already rides on (see
+  // ActuatorModel's own comment) - passing it straight through here is
+  // what gives the visual gear a real transition instead of a snap toggle,
+  // now that landingGearRig actually animates rather than just hiding/
+  // showing parts
+  landingGearRig?.update(controlActuators.gear)
 
   if (hudPlane.visible) {
     hud.update(renderState, airplaneControlInput, f16simulation.atmosphericModel, compassOffset)
@@ -474,6 +701,45 @@ async function getStartpointFromParameters(urlParams) {
   return [east, north, alt, rotation, lonlat]
 }
 
+// f16-5/f16.glb is authored in its own arbitrary units - this converts them
+// to meters, calibrated against the real F-16's ~9.45 m clean wingspan versus
+// the model's own wingspan measured in raw units. The OBJ, by contrast, was
+// already authored directly in meters (its own hinge points and (0, 2, -1.6)
+// offset are all meter-scale numbers), so this same factor - which turns the
+// GLB's gear into real-world meters - is what makes the extracted gear a
+// physically correct size to attach to the OBJ.
+const GEAR_MODEL_SCALE = 0.557
+
+// gear legs, wheels, and gear-bay doors - the only nodes kept visible out of
+// f16-5/f16.glb once it's reduced to "a source of landing gear geometry" for
+// the OBJ. See landingGearRig.js for what drives them.
+//
+// The GLB's nose-to-main-gear spacing doesn't scale onto the OBJ's own
+// fuselage as a single rigid offset - fixing the main gear under the OBJ's
+// wing root left the nose gear as far aft as the tail. The two models don't
+// share proportions, so nose and main gear each get their own correction
+// (added to that part's own existing position, in the GLB's local space)
+// instead of one offset for the whole model. Both are tuned by eye against
+// the OBJ's fuselage and need iterating further if they look off.
+const NOSE_GEAR_NAMES = ["F-16_chassesFront1_LOD0_4", "F-16_chassesFront2_LOD0_5", "F-16_chassesFront3_LOD0_6", "F-16_whel_LOD0_36", "F-16_capFlont_LOD0_1"]
+const NOSE_GEAR_OFFSET = [0, 0, -0.02]
+
+const MAIN_GEAR_NAMES = [
+  "F-16_chassesL1_LOD0_7",
+  "F-16_chassesL2_LOD0_8",
+  "F-16_chassesL3_LOD0_9",
+  "F-16_chassesL4_LOD0_10",
+  "F-16_whelL_LOD0_37",
+  "F-16_capL_LOD0_2",
+  "F-16_chassesR1_LOD0_11",
+  "F-16_chassesR2_LOD0_12",
+  "F-16_chassesR3_LOD0_13",
+  "F-16_chassesR4_LOD0_14",
+  "F-16_whelR_LOD0_38",
+  "F-16_capR_LOD0_3",
+]
+const MAIN_GEAR_OFFSET = [0, 0.9, -0.02]
+
 function loadAircraftModel(f16) {
   const manager = new LoadingManager()
   new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
@@ -499,6 +765,100 @@ function loadAircraftModel(f16) {
           console.log("Could not load 3d model: " + error)
         },
       )
+  })
+
+  loadLandingGear(f16)
+}
+
+function loadLandingGear(f16) {
+  new GLTFLoader().load(
+    "f16/gear.glb",
+    (gltf) => {
+      const object = gltf.scene
+
+      object.scale.setScalar(GEAR_MODEL_SCALE)
+
+      // same axis alignment f16-5 needed when it was the whole visible model
+      // (see git history) - this file was cut down from f16-5/f16.glb to
+      // just the 17 gear/door parts actually used (see
+      // scripts/extract-landing-gear.js), carrying over the rotation its old
+      // parent node had, so it still needs the same single +90 correction to
+      // match the body frame f16's own quaternion expects.
+      object.rotateX(90 * MathUtils.DEG2RAD)
+
+      // the whole model's own origin needs no extra offset - the per-group
+      // corrections below handle placing the gear against the OBJ's
+      // fuselage, since a single offset for the whole model can't fit both
+      // the nose and main gear at once (see the comment above their names).
+      object.position.set(0, 0, 0)
+
+      f16.add(object)
+
+      // NOSE_GEAR_OFFSET/MAIN_GEAR_OFFSET are meters, in f16's own local
+      // (body) frame - the same frame the OBJ's (0, 2, -1.6) offset is in.
+      // Each part sits several rotated, scaled levels down inside this GLB's
+      // own node hierarchy though, so the offset can't just be added to a
+      // part's .position directly (an earlier attempt to hand-convert it by
+      // un-rotating and un-scaling landed nowhere close - this GLB's root
+      // node bakes in its own extra rotation that a single object.quaternion
+      // inverse doesn't account for). Going through world space sidesteps
+      // that entirely: rotate the offset by f16's actual world orientation,
+      // add it to the part's actual current world position, then let
+      // three.js's own worldToLocal convert that back for us.
+      f16.updateWorldMatrix(true, true)
+      const f16WorldQuaternion = f16.getWorldQuaternion(new Quaternion())
+
+      function nudge(names, finalFrameOffset) {
+        const deltaWorld = new Vector3(...finalFrameOffset).applyQuaternion(f16WorldQuaternion)
+        for (const name of names) {
+          const part = object.getObjectByName(name)
+          if (!part) continue
+          const worldPos = part.getWorldPosition(new Vector3()).add(deltaWorld)
+          part.position.copy(part.parent.worldToLocal(worldPos))
+        }
+      }
+
+      nudge(NOSE_GEAR_NAMES, NOSE_GEAR_OFFSET)
+      nudge(MAIN_GEAR_NAMES, MAIN_GEAR_OFFSET)
+
+      landingGearRig = new LandingGearRig(object)
+      tintGearToMatchBody(object)
+    },
+    (xhr) => {},
+    (error) => {
+      console.log("Could not load landing gear model: " + error)
+    },
+  )
+}
+
+// f16-5's own metal/strut material comes in noticeably lighter than the
+// OBJ's body skin - average sampled color (123, 126, 125) against the OBJ's
+// (70, 70, 74) - so it reads as mismatched silver against the OBJ's darker
+// gray. Tinting is a plain multiply of MeshStandardMaterial's color against
+// its base color texture, so this ratio pulls the gear texture towards that
+// darker shade without touching the texture itself - pulling it all the way
+// to the OBJ's own average came out too dark in practice (a dark surface
+// with the glTF's default roughness still throws a bright specular
+// highlight, which reads worse than just being lighter), so this only goes
+// about a third of the way there. Roughness is also pushed towards fully
+// matte, to kill that shine on the struts and wheels - real gear legs are
+// unpolished metal, not chrome. Only the textured material is touched - the
+// glass material (used nowhere on the visible gear/door parts) has no map
+// and is left alone.
+const GEAR_TINT = [0.85, 0.84, 0.86]
+const GEAR_ROUGHNESS = 0.95
+
+function tintGearToMatchBody(object) {
+  const tint = new Color(...GEAR_TINT).convertSRGBToLinear()
+  const tinted = new Set()
+
+  object.traverse((child) => {
+    if (child.isMesh && child.material?.map && !tinted.has(child.material)) {
+      child.material.color.copy(tint)
+      child.material.roughness = GEAR_ROUGHNESS
+      child.material.metalness = 0
+      tinted.add(child.material)
+    }
   })
 }
 
@@ -546,6 +906,10 @@ function keyboardHandler(keyboardEvent) {
     case "h": // hud toggle
       hudPlane.visible = !hudPlane.visible
       break
+    case "p": // pause/resume the entire simulation
+      paused = !paused
+      console.log("Simulation: %s", paused ? "paused" : "running")
+      break
     case "t": {
       // weather on/off - the steady wind and the turbulence in it, together
       const weather = !f16simulation.windModel.enabled
@@ -591,6 +955,15 @@ function keyboardHandler(keyboardEvent) {
       break
     case "w":
       showWireFrame = !showWireFrame
+      break
+    case "g": // landing gear up/down
+      gearDown = !gearDown
+      airplaneControlInput.gear = gearDown ? 1 : 0
+      console.log("Landing gear: %s", gearDown ? "down" : "up")
+      break
+    case "b": // wheel brakes - spring-centering, hold/tap to keep pressure on
+      airplaneControlInput.brake += BRAKE_STEP
+      break
   }
 }
 

@@ -40,6 +40,11 @@ export default class StateVector {
     // for the instruments and the control laws to read.
     this.airspeed = 0
     this.pow = 0 // percent, 0 <= pow <= 100
+
+    // rate of descent, ft/min, positive = descending. Like airspeed above,
+    // this is not integrated - it is worked out from the altitude rate each
+    // step and put here for the instruments to read.
+    this.sinkRate = 0
   }
 
   init(startPoint, startDirection) {
@@ -131,6 +136,7 @@ export default class StateVector {
     this.nz = other.nz
 
     this.airspeed = other.airspeed
+    this.sinkRate = other.sinkRate
 
     this.pow = other.pow
   }
@@ -154,6 +160,7 @@ export default class StateVector {
     this.nz = from.nz + (to.nz - from.nz) * alongStep
 
     this.airspeed = from.airspeed + (to.airspeed - from.airspeed) * alongStep
+    this.sinkRate = from.sinkRate + (to.sinkRate - from.sinkRate) * alongStep
 
     this.pow = from.pow + (to.pow - from.pow) * alongStep
 
@@ -237,5 +244,6 @@ export default class StateVector {
     this.nz = (k1.nz + 2 * k2.nz + 2 * k3.nz + k4.nz) / 6
 
     this.airspeed = (k1.airspeed + 2 * k2.airspeed + 2 * k3.airspeed + k4.airspeed) / 6
+    this.sinkRate = (k1.sinkRate + 2 * k2.sinkRate + 2 * k3.sinkRate + k4.sinkRate) / 6
   }
 }

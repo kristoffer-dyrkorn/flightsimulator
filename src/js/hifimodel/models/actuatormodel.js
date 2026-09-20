@@ -76,6 +76,40 @@ const SURFACES = [
     min: SimulationConstants.SPEEDBRAKE_MIN,
     max: SimulationConstants.SPEEDBRAKE_MAX,
   },
+  {
+    // not a real control surface with a bandwidth behind it - this is the
+    // aerodynamic gear position, 0..1, that f16simulation.js scales its
+    // added gear drag by. It is deliberately decoupled from the visual gear
+    // model, which shows/hides instantly on the pilot's command: real gear
+    // takes time to travel, and that time should cost drag while it happens,
+    // whether or not the mesh bothers to animate the same transition. Rate
+    // limited rather than lagged, same reasoning as the speedbrake above -
+    // a fixed travel time, not a bandwidth.
+    name: "gear",
+    rate: 1 / SimulationConstants.GEAR_TRANSITION_TIME,
+    tau: 1 / 20.2,
+    min: 0,
+    max: 1,
+  },
+  {
+    // wheel brake pedal position, 0..1 - a fast hydraulic response rather
+    // than a bandwidth-limited surface, but not instant either
+    name: "brake",
+    rate: 4, // full travel in about 0.25s
+    tau: 1 / 20.2,
+    min: 0,
+    max: 1,
+  },
+  {
+    // nosewheel steering angle, driven by the rudder pedals once the nose
+    // gear has weight on it (see landinggearmodel.js) - its own hydraulic
+    // steering actuator, independent of the rudder's
+    name: "noseSteer",
+    rate: 60,
+    tau: 1 / 20.2,
+    min: -SimulationConstants.NOSEWHEEL_STEER_MAX,
+    max: SimulationConstants.NOSEWHEEL_STEER_MAX,
+  },
 ]
 
 function limit(value, min, max) {
@@ -93,6 +127,9 @@ export default class ActuatorModel {
     this.rudder = 0
     this.lef = 0
     this.speedbrake = 0
+    this.gear = 0 // starts up, matching the sim's own starting state
+    this.brake = 0
+    this.noseSteer = 0
 
     /* throttle setting, fraction - passed through untouched */
     this.throttle = 0

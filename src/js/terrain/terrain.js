@@ -1,6 +1,7 @@
 import Tile from "./tile.js"
 import { Vector3 } from "three"
 import { GenerateMeshBVHWorker } from "../externals/workers/GenerateMeshBVHWorker.js"
+import RunwayRegistry from "./runways.js"
 
 const TILE_EXTENTS = 50 * 255
 
@@ -10,6 +11,11 @@ export default class Terrain {
     this.tiles = new Map()
     this.minx = minx
     this.miny = miny
+
+    // runway legality polygons for the tiles that are currently loaded -
+    // see runways.js. Owned here, alongside the tiles themselves, since
+    // it's kept in step with exactly the same load/unload lifecycle.
+    this.runways = new RunwayRegistry()
 
     // queue for fetching tiles, to rate limit image fetching and decoding
     this.fetchQueue = []

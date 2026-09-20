@@ -3,6 +3,7 @@ import AtmosphericModel from "./models/atmosphericmodel.js"
 import CompressibilityModel from "./models/compressibilitymodel.js"
 import TurbulenceModel from "./models/turbulencemodel.js"
 import WindModel from "./models/windmodel.js"
+import LandingGearModel from "./models/landinggearmodel.js"
 import StateVector from "./statevector.js"
 import SimulationConstants from "./simulationconstants.js"
 import {
@@ -25,6 +26,7 @@ export default class F16Simulation {
     this.compressibilityModel = new CompressibilityModel()
     this.turbulenceModel = new TurbulenceModel()
     this.windModel = new WindModel()
+    this.landingGearModel = new LandingGearModel()
   }
 
   limit(value, min, max) {
@@ -301,7 +303,15 @@ export default class F16Simulation {
     const CD = -(Cx_tot * caAero + Cz_tot * saAero)
     const CL = Cx_tot * saAero - Cz_tot * caAero
 
-    const CD_mach = CD + this.compressibilityModel.waveDrag
+    /* the gear is not in the tunnel data behind hifi_C, so this is a flat
+       parasite-drag increment rather than anything alpha-dependent, scaled
+       by the actuator's own rate-limited gear position - not the pilot's
+       raw command - so the extra drag builds and fades over the same 6
+       second travel time the gear itself is assumed to take, independent of
+       how fast the visual model shows or hides it */
+    const CD_gear = SimulationConstants.GEAR_DRAG * u.gear
+
+    const CD_mach = CD + this.compressibilityModel.waveDrag + CD_gear
     const CL_mach = CL * this.compressibilityModel.liftFactor
 
     const Cx_mach = -CD_mach * caAero + CL_mach * saAero
@@ -318,12 +328,22 @@ export default class F16Simulation {
     const Ybar = this.atmosphericModel.qbar * S * Cy_tot
     const Zbar = this.atmosphericModel.qbar * S * Cz_mach
 
+    /* ground reaction - zero whenever every leg is clear of the ground (the
+       model itself checks penetration per leg), so this is a no-op for the
+       entire rest of a normal flight. See landinggearmodel.js. */
+    const noseSteerRad = u.noseSteer * SimulationConstants.DTOR
+    const gear = this.landingGearModel.update(alt, U, V, W, P, Q, R, r20, r21, r22, u.gear, u.brake, noseSteerRad)
+
+    const Xtot = Xbar + gear.X
+    const Ytot = Ybar + gear.Y
+    const Ztot = Zbar + gear.Z
+
     /* gravity resolved into body axes is g times the "down" row of the
        body -> earth matrix, ie (r20, r21, r22). in euler terms that row is
        (-sin(theta), sin(phi)cos(theta), cos(phi)cos(theta)). */
-    const Udot = R * V - Q * W + g * r20 + (Xbar + T) / m
-    const Vdot = P * W - R * U + g * r21 + Ybar / m
-    const Wdot = Q * U - P * V + g * r22 + Zbar / m
+    const Udot = R * V - Q * W + g * r20 + (Xtot + T) / m
+    const Vdot = P * W - R * U + g * r21 + Ytot / m
+    const Wdot = Q * U - P * V + g * r22 + Ztot / m
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
         vt_dot equation (from S&L, p82)
@@ -347,9 +367,9 @@ export default class F16Simulation {
        compute Pdot, Qdot, and Rdot (as in Stevens and Lewis p32)
        %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%% */
 
-    const L_tot = Cl_tot * this.atmosphericModel.qbar * S * B /* get moments from coefficients */
-    const M_tot = Cm_mach * this.atmosphericModel.qbar * S * cbar
-    const N_tot = Cn_tot * this.atmosphericModel.qbar * S * B
+    const L_tot = Cl_tot * this.atmosphericModel.qbar * S * B + gear.L /* get moments from coefficients */
+    const M_tot = Cm_mach * this.atmosphericModel.qbar * S * cbar + gear.M
+    const N_tot = Cn_tot * this.atmosphericModel.qbar * S * B + gear.N
 
     const denom = Jx * Jz - Jxz * Jxz
 
@@ -391,15 +411,20 @@ export default class F16Simulation {
     xd.q2 -= dq * q2
     xd.q3 -= dq * q3
 
-    xd.nx = (Xbar + T) / m / g
-    xd.ny = Ybar / m / g
-    xd.nz = -Zbar / m / g
+    xd.nx = (Xtot + T) / m / g
+    xd.ny = Ytot / m / g
+    xd.nz = -Ztot / m / g
 
     /* Not a derivative either, but the aircraft's own instruments read it and
        the control laws are scheduled on it, and neither of them can get at it
        any other way: in a wind the speed over the ground the state carries is
        not the speed through the air. */
     xd.airspeed = vta
+
+    /* altdot above is the rate of climb, ft/sec, positive = climbing. Sink
+       rate is instrument convention for the same thing the other way up,
+       in ft/min, positive = descending. */
+    xd.sinkRate = -xd.alt * 60
 
     return xd
   }
