@@ -385,31 +385,6 @@ function landingFailureReasons(status) {
   return reasons
 }
 
-// Landing-readiness telemetry, printed every 0.5 s while the aircraft is
-// airborne (once down and rolling, there's nothing left to preview) - the
-// same parameters the crash check below judges a touchdown by, so the
-// console shows exactly what would happen if the aircraft touched down
-// right now, continuously, rather than only finding out after the fact.
-setInterval(() => {
-  if (paused || onGround) return
-
-  const status = evaluateLandingConditions()
-  const reasons = landingFailureReasons(status)
-
-  console.log(
-    "Landing check: gear %s | sink rate %s ft/min (max %s) | bank %s deg (max %s) | wheel clearance %s m (need < %s) | over runway: %s -> %s",
-    status.gearDown ? "down" : "up",
-    status.sinkRate.toFixed(1),
-    SimulationConstants.MAX_SAFE_SINK_RATE,
-    status.bank.toFixed(1),
-    SimulationConstants.MAX_SAFE_BANK,
-    Number.isFinite(status.closestWheelClearance) ? status.closestWheelClearance.toFixed(1) : "-",
-    SimulationConstants.GEAR_CONTACT_CLEARANCE,
-    status.onRunway ? "yes" : "no",
-    reasons.length === 0 ? "would be a safe landing" : "would crash right now (" + reasons.join(", ") + ")",
-  )
-}, 500)
-
 // check for ground collision every 200 ms
 setInterval(() => {
   if (paused) return
