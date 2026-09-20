@@ -1,4 +1,4 @@
-import { Group, Object3D, MathUtils, Vector3, Matrix4 } from "three"
+import { Group, Object3D, MathUtils, Vector3, Matrix4, Quaternion } from "three"
 import { extremeCorner, findHingeEdge } from "./gearGeometry.js"
 
 /*
@@ -39,7 +39,7 @@ const LEG_CONFIGS = [
     // forward (toward the nose) net 0.48m (0.2 + 0.2 + 0.08) - see mainL's
     // own doorPositionOffset comment below for the +Y-forward convention
     // and why this is applied to the door mesh before its hinge is computed
-    doorPositionOffset: [0, 0.48, 0],
+    doorPositionOffset: [0, 0.48, -0.02],
     // door hinge edge: the more-extreme side of the door's own (slightly
     // off-center) local bounding box, topmost point of that edge - see
     // the constructor's use of findHingeEdge, and its own comment, for why
@@ -54,12 +54,44 @@ const LEG_CONFIGS = [
     // of the door; doorSign flips along with it for the same reason it did
     // on the main gear doors below - moving the hinge to the other edge
     // swaps which way the panel's own mass sweeps for a given sign.
+    //
+    // +1 on x is the door's own right-hand edge - confirmed directly
+    // against the asset's own L/R naming (F-16_whelL_LOD0_37 sits at
+    // negative x, F-16_whelR_LOD0_38 at positive x in this same frame),
+    // not just inferred from the main gear doors' comments below - and
+    // that edge sits roughly flush against the fuselage when the door is
+    // closed, matching a real hinge line.
     doorHingePrimaryAxis: "x",
     doorHingePrimarySign: 1,
     doorHingeSecondaryAxis: "z",
-    doorHingeSecondarySign: 1,
+    doorHingeSecondarySign: -1,
+    // Every other door here rotates about its edge's own real tangent
+    // direction (see findHingeEdge's comment) because the main gear
+    // doors' hinge line runs along a curved part of the fuselage. The nose
+    // door's right edge does not - it is flush and straight - so this
+    // overrides that with a plain "straight ahead" axis (the object's own
+    // local +z, the same forward direction used throughout this file)
+    // instead of whatever small tilt the mesh's own edge geometry happens
+    // to carry. Position still comes from the edge (below), only the
+    // rotation axis direction is fixed here.
+    doorHingeAxisOverride: [0, 0, 1],
+    // the hinge line findHingeEdge/the axis override above land on sits
+    // 0.2m too low to read as the real hinge - shifts the pivot straight
+    // up (world/object +z, this file's established "up" convention),
+    // independent of the axis direction above.
+    doorHingePositionOffset: [0.1, 0, 0.25],
+    // nudges the pivot toward the door's own right-hand edge, in the
+    // DOOR's own local frame (not world/object space, unlike the offset
+    // above) - x is the door's own local lateral axis, so positive here is
+    // further toward the same edge doorHingePrimarySign already selects.
+    // See the constructor for how a local-frame offset like this gets
+    // turned into a world-space nudge (same approach doorPositionOffset
+    // and index.js's own nudge() use, for the same reason: a fixed offset
+    // only means the right thing worked out in the frame it was measured
+    // in).
+    doorHingeLocalOffset: [-0.3, 0, 0.2],
     doorAngleDeg: 95,
-    doorSign: -1,
+    doorSign: 1,
   },
   {
     name: "mainL",
@@ -72,7 +104,7 @@ const LEG_CONFIGS = [
     // moved forward 0.15 from there. Applied to the door mesh itself (see
     // the constructor), before its hinge is computed from its own
     // geometry, so the hinge point moves with it.
-    doorPositionOffset: [0, -0.45, 0],
+    doorPositionOffset: [0, -0.45, 0.03],
     // outboard = more negative X on the left side, topmost point of that
     // edge - see the nose leg's comment above on why this is an actual
     // edge direction (findHingeEdge) rather than a plain world axis
@@ -91,10 +123,15 @@ const LEG_CONFIGS = [
   },
   {
     name: "mainR",
-    strutParts: ["F-16_chassesR1_LOD0_11", "F-16_chassesR2_LOD0_12", "F-16_chassesR3_LOD0_13", "F-16_chassesR4_LOD0_14"],
+    strutParts: [
+      "F-16_chassesR1_LOD0_11",
+      "F-16_chassesR2_LOD0_12",
+      "F-16_chassesR3_LOD0_13",
+      "F-16_chassesR4_LOD0_14",
+    ],
     wheelName: "F-16_whelR_LOD0_38",
     doorPart: "F-16_capR_LOD0_3",
-    doorPositionOffset: [0, -0.45, 0], // see mainL's comment above
+    doorPositionOffset: [0, -0.45, 0.03], // see mainL's comment above
     doorHingePrimaryAxis: "x",
     doorHingePrimarySign: 1, // outboard = more positive X on the right side
     doorHingeSecondaryAxis: "z",
@@ -201,21 +238,40 @@ export default class LandingGearRig {
           "y", // the door's own local "length" axis - see gearGeometry.js's findHingeEdge
         )
 
+        const pivotWorldPos = edge.position.clone()
+        if (config.doorHingePositionOffset) pivotWorldPos.add(new Vector3(...config.doorHingePositionOffset))
+        if (config.doorHingeLocalOffset) {
+          // rotate the door's own local-frame offset into world space
+          // before adding it, same reasoning as doorPositionOffset above -
+          // door hasn't been reparented yet at this point, so its current
+          // world quaternion is still the right one to measure "local" against
+          const doorWorldQuaternion = door.getWorldQuaternion(new Quaternion())
+          pivotWorldPos.add(new Vector3(...config.doorHingeLocalOffset).applyQuaternion(doorWorldQuaternion))
+        }
+
         doorPivot = new Group()
-        doorPivot.position.copy(object.worldToLocal(edge.position.clone()))
+        doorPivot.position.copy(object.worldToLocal(pivotWorldPos))
         object.add(doorPivot)
         doorPivot.attach(door) // re-parents, preserving the door's current world transform
 
-        // the pivot itself carries no rotation of its own (only .position
-        // was set above), so its local axes match `object`'s local axes -
-        // the world-space hinge direction has to go through the same
-        // transform to be usable as a rotation axis in that local space.
-        // transformDirection (rotation only, no translation) is what a
-        // direction needs, unlike the worldToLocal used for the position
-        // above (which includes translation, correct for a point but not
-        // a direction)
-        const worldToLocalRotation = new Matrix4().copy(object.matrixWorld).invert()
-        doorHingeAxisLocal = edge.axis.clone().transformDirection(worldToLocalRotation)
+        if (config.doorHingeAxisOverride) {
+          // see the nose leg's own comment on doorHingeAxisOverride - a
+          // fixed direction in object's own local frame, so no world/local
+          // conversion is needed (unlike edge.axis below, which comes out
+          // of the mesh in true world space)
+          doorHingeAxisLocal = new Vector3(...config.doorHingeAxisOverride).normalize()
+        } else {
+          // the pivot itself carries no rotation of its own (only .position
+          // was set above), so its local axes match `object`'s local axes -
+          // the world-space hinge direction has to go through the same
+          // transform to be usable as a rotation axis in that local space.
+          // transformDirection (rotation only, no translation) is what a
+          // direction needs, unlike the worldToLocal used for the position
+          // above (which includes translation, correct for a point but not
+          // a direction)
+          const worldToLocalRotation = new Matrix4().copy(object.matrixWorld).invert()
+          doorHingeAxisLocal = edge.axis.clone().transformDirection(worldToLocalRotation)
+        }
       }
 
       this.legs.push({ config, doorPivot, doorHingeAxisLocal, strutMeshes })
