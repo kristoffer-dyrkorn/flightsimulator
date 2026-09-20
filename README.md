@@ -39,18 +39,19 @@ September 2026:
 - Added von Kármán wind turbulence model
 - Added landing gears and updated the aerodynamic model so gear drag is correctly modelled
 - Added support for landing on all of Norway's runways except Sola / Stavanger. Sola could not be included since the PDF containing the official Avinor runway documentation could not be parsed - and thus the runway geometries and coordinates there could not be extracted.
+- Fixed ground texture displacement bug
 
 August 2026:
 
-- Use quaternions instead of Euler angles in the physics model, fixes various numerical instabilites
+- Use quaternions instead of Euler angles in the physics model, avoids gimbal lock and improves numerical robustness
 - Now calculates the compass direction correctly
-- Decoupled the physics loop from the rendering loop to avoid large time steps (and instability)
-- Fixed leading edge flap calculations (typo in variable name)
-- Fixed wrong data in speed brake aerodynamic table and enabled air brakes
+- Decoupled the physics loop from the rendering loop to avoid large time steps and numerical instabilities
+- Fixed leading edge flap calculations
+- Fixed wrong data in air brake aerodynamic table and enabled air brakes
 - Fixed bug in flight path indicator placement
 - Fixed limitations in the atmospheric model for high altitudes
-- Fixed aircraft jitter when using the chase camera
-- Added actuator lag and an FCS. The data flow is now: stick input -> FCS model (optimizer/limiter) -> actuator signal -> updated rudder positions -> physics model
+- Fixed jitter when using the chase camera
+- Added actuator lag and an FCS for fly-by-wire control. The data flow is now: stick input -> FCS model (optimizer/limiter) -> actuator signal -> new rudder positions -> physics model
 - Added air compressibility model (transonic drag)
 - Switched from Euler integration to RK4 integration in the physics model, improving accuracy
 
