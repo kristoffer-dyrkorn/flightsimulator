@@ -40,6 +40,8 @@ September 2026:
 - Added landing gears and updated the aerodynamic model so gear drag is correctly modelled
 - Added support for landing on all of Norway's runways except Sola / Stavanger. Sola could not be included since the PDF containing the official Avinor runway documentation could not be parsed - and thus the runway geometries and coordinates there could not be extracted.
 - Fixed ground texture displacement bug
+- Added high resolution runway geometries with correct elevations, based on Avinor documentation
+- Added landing mode when gear is extended, with flaperons and AoA-based controls
 
 August 2026:
 
