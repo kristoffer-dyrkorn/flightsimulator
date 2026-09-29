@@ -39,6 +39,11 @@ export default class StateVector {
     // model works it out from the wind it is flying through, and puts it here
     // for the instruments and the control laws to read.
     this.airspeed = 0
+    // angle of attack against the air, radians - alpha above is against the
+    // velocity over the ground. Like airspeed, worked out by the flight
+    // model rather than integrated, and what the instruments and the
+    // control laws read.
+    this.airAlpha = 0
     this.pow = 0 // percent, 0 <= pow <= 100
 
     // rate of descent, ft/min, positive = descending. Like airspeed above,
@@ -66,6 +71,7 @@ export default class StateVector {
 
     this.vt = 506 // feet/sec, ~ km/t => 300 knots
     this.airspeed = this.vt
+    this.airAlpha = this.alpha
     this.pow = 30 // % thrust
 
     // set initial G to constant, level flight
@@ -136,6 +142,7 @@ export default class StateVector {
     this.nz = other.nz
 
     this.airspeed = other.airspeed
+    this.airAlpha = other.airAlpha
     this.sinkRate = other.sinkRate
 
     this.pow = other.pow
@@ -160,6 +167,7 @@ export default class StateVector {
     this.nz = from.nz + (to.nz - from.nz) * alongStep
 
     this.airspeed = from.airspeed + (to.airspeed - from.airspeed) * alongStep
+    this.airAlpha = from.airAlpha + (to.airAlpha - from.airAlpha) * alongStep
     this.sinkRate = from.sinkRate + (to.sinkRate - from.sinkRate) * alongStep
 
     this.pow = from.pow + (to.pow - from.pow) * alongStep
@@ -244,6 +252,7 @@ export default class StateVector {
     this.nz = (k1.nz + 2 * k2.nz + 2 * k3.nz + k4.nz) / 6
 
     this.airspeed = (k1.airspeed + 2 * k2.airspeed + 2 * k3.airspeed + k4.airspeed) / 6
+    this.airAlpha = (k1.airAlpha + 2 * k2.airAlpha + 2 * k3.airAlpha + k4.airAlpha) / 6
     this.sinkRate = (k1.sinkRate + 2 * k2.sinkRate + 2 * k3.sinkRate + k4.sinkRate) / 6
   }
 }

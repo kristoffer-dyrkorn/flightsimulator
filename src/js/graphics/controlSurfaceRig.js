@@ -1,4 +1,5 @@
 import { Group, Vector3, MathUtils } from "three"
+import { mixFlaperons } from "../hifimodel/flaperons.js"
 
 /*
  * Pivots the named meshes in the loaded f16.obj model about their real hinge
@@ -27,6 +28,11 @@ import { Group, Vector3, MathUtils } from "three"
  *                              hinge on their own leading edge - the straight
  *                              swept line the mesh's front two corners at
  *                              root and tip define.
+ *                              They are the flaperons: `flaperon` says which
+ *                              side each one is, so update() can mix the
+ *                              flap command in with the aileron one (see
+ *                              flaperons.js). A positive angle lowers the
+ *                              right one and raises the left one.
  *   lef (VoletR/L01)           a leading-edge surface, so it hinges on its
  *                              own trailing edge - same construction as the
  *                              aileron, front swapped for back.
@@ -56,8 +62,8 @@ const HINGES = {
     { mesh: "ElevatorL01", point: [1.0825, 1.657, -5.548], axis: [1, 0, 0], sign: -1, diff: -1 },
   ],
   aileron: [
-    { mesh: "AileronR01", point: [-1.0855, 1.629, -2.734], axis: [-2.5629, -0.02, -0.3885], sign: 1 },
-    { mesh: "AileronL01", point: [1.0855, 1.629, -2.734], axis: [2.5629, -0.02, -0.3885], sign: 1 },
+    { mesh: "AileronR01", point: [-1.0855, 1.629, -2.734], axis: [-2.5629, -0.02, -0.3885], sign: 1, flaperon: "right" },
+    { mesh: "AileronL01", point: [1.0855, 1.629, -2.734], axis: [2.5629, -0.02, -0.3885], sign: 1, flaperon: "left" },
   ],
   lef: [
     { mesh: "VoletR01", point: [-1.3583, 1.5915, -0.4258], axis: [-3.2571, -0.0008, -2.1933], sign: -1 },
@@ -116,6 +122,7 @@ export default class ControlSurfaceRig {
           axis: new Vector3(...entry.axis).normalize(),
           sign: entry.sign,
           diff: entry.diff ?? 0,
+          flaperon: entry.flaperon ?? null,
         })
       }
     }
@@ -126,8 +133,15 @@ export default class ControlSurfaceRig {
    *                    control surface positions, in degrees
    */
   update(actuators) {
-    for (const { channel, pivot, axis, sign, diff } of this.pivots) {
-      const deg = actuators[channel] + diff * actuators.stabilatorDiff
+    const flaperons = mixFlaperons(actuators.aileron, actuators.tef)
+
+    for (const { channel, pivot, axis, sign, diff, flaperon } of this.pivots) {
+      // each flaperon's own trailing edge down deflection, turned back into
+      // this rig's convention of positive lowering the right one
+      let deg = actuators[channel] + diff * actuators.stabilatorDiff
+      if (flaperon === "right") deg = flaperons.right
+      if (flaperon === "left") deg = -flaperons.left
+
       pivot.setRotationFromAxisAngle(axis, sign * deg * MathUtils.DEG2RAD)
     }
   }

@@ -49,12 +49,10 @@ import SimulationConstants from "../simulationconstants.js"
  *
  * LEGS are body-frame positions relative to the CG, in feet (x forward, y
  * right, z down - the same convention x.p/x.q/x.r and the body velocities
- * already use everywhere else in this file). None of these come from a
- * measured drawing - they're estimated from public F-16 gear track/wheelbase
- * figures (roughly 15.5 ft wheelbase, 9.1 ft main gear track) and a plausible
- * static load split between nose and main gear for a tricycle layout (~23%
- * nose, ~77% main), the same kind of estimate GEAR_DRAG and the landing
- * safety thresholds in simulationconstants.js are.
+ * already use everywhere else in this file), of each tire's contact point
+ * with the strut fully extended. They're derived from where the visual
+ * tires sit (see VISUAL_* below), so the physics and the rendered gear
+ * agree on where the ground is.
  */
 
 const N_PER_M_TO_LB_PER_FT = 0.0685218 // (lbf / N) / (ft / m)
@@ -162,16 +160,38 @@ const NOSE_GEAR_DAMPING_EXTENSION = NOSE_GEAR_DAMPING_COMPRESSION * 2.5
    the same one the header comment above flags for the spring-damper - would
    let a nearly-stopped wheel chatter instead of settling; the ramp trades a
    little precision very close to zero speed for a friction force that's
-   continuous in velocity everywhere. */
+   continuous in velocity everywhere.
+
+   A rolling tire's side force builds up with its slip angle - the angle
+   between where the wheel points and where it's going - rather than with
+   the sideways slip velocity itself, reaching its peak around
+   TIRE_PEAK_SLIP_ANGLE. So the side force ramps over whichever is larger:
+   FRICTION_VELOCITY_EPS, or the sideways velocity that peak slip angle
+   works out to at the wheel's current rolling speed. Ramping over
+   FRICTION_VELOCITY_EPS alone at every speed would make the tire far too
+   stiff when rolling fast - at landing speeds a fraction of a degree of
+   nosewheel steering would already get full side grip, enough to yank the
+   aircraft around and roll it over. */
 const ROLLING_FRICTION_COEFF = 0.02
 const TIRE_SIDE_FRICTION_COEFF = 0.8
 const FRICTION_VELOCITY_EPS = 1.0 // ft/s
 
+/* With the brakes on, the rolling friction ramps up over a shorter slip -
+   a held brake has the wheel all but locked, so it should take little creep
+   for it to hold the aircraft still. It can't be made much shorter than
+   this: the flight model carries velocity as a speed and two angles, which
+   can't pass cleanly through zero, and a friction force that stiff at a
+   standstill pushes the speed through zero and breaks it. So a braked
+   aircraft can still creep a centimetre or two a second against idle
+   thrust and gusts - half what it did with the unbraked ramp. */
+const BRAKED_FRICTION_VELOCITY_EPS = 0.5 // ft/s, at full brake
+const TIRE_PEAK_SLIP_ANGLE = 8 * SimulationConstants.DTOR
+
 // Coulomb friction opposing `velocity`, capped at `maxForce` and ramped
-// linearly to that cap over the first FRICTION_VELOCITY_EPS ft/s of slip
-// rather than snapping there discontinuously - see the comment above.
-function regularizedFriction(velocity, maxForce) {
-  const ratio = Math.max(-1, Math.min(1, velocity / FRICTION_VELOCITY_EPS))
+// linearly to that cap over the first `rampVelocity` ft/s of slip rather
+// than snapping there discontinuously - see the comment above.
+function regularizedFriction(velocity, maxForce, rampVelocity = FRICTION_VELOCITY_EPS) {
+  const ratio = Math.max(-1, Math.min(1, velocity / rampVelocity))
   return -maxForce * ratio
 }
 
@@ -184,15 +204,16 @@ function regularizedFriction(velocity, maxForce) {
    "forward" as the body X axis. At steerAngle = 0 the rotations are the
    identity, cos=1/sin=0, so an unsteered leg (both main legs, always) comes
    out exactly as if this function were the simple axis-aligned version. */
-function tireForce(pointU, pointV, upForce, rollingCoeff, steerAngle) {
+function tireForce(pointU, pointV, upForce, rollingCoeff, rollRampVelocity, steerAngle) {
   const cosSteer = Math.cos(steerAngle)
   const sinSteer = Math.sin(steerAngle)
 
   const wheelForward = pointU * cosSteer + pointV * sinSteer
   const wheelLateral = -pointU * sinSteer + pointV * cosSteer
 
-  const wheelRollForce = regularizedFriction(wheelForward, rollingCoeff * upForce)
-  const wheelSideForce = regularizedFriction(wheelLateral, TIRE_SIDE_FRICTION_COEFF * upForce)
+  const wheelRollForce = regularizedFriction(wheelForward, rollingCoeff * upForce, rollRampVelocity)
+  const sideRampVelocity = Math.max(FRICTION_VELOCITY_EPS, Math.abs(wheelForward) * Math.tan(TIRE_PEAK_SLIP_ANGLE))
+  const wheelSideForce = regularizedFriction(wheelLateral, TIRE_SIDE_FRICTION_COEFF * upForce, sideRampVelocity)
 
   return {
     x: wheelRollForce * cosSteer - wheelSideForce * sinSteer,
@@ -200,11 +221,19 @@ function tireForce(pointU, pointV, upForce, rollingCoeff, steerAngle) {
   }
 }
 
+/* Where the bottoms of the visual tires are, body frame, ft - measured from
+   gear.glb as index.js places it on the aircraft, which matches the real
+   F-16's 4.00 m wheelbase and 2.36 m track. The model shows the struts
+   fully extended, which makes these the contact points; the struts'
+   compression is animated on top of that (see strutTravel). */
+const VISUAL_NOSE_TIRE = { x: 12.27, z: 5.78 }
+const VISUAL_MAIN_TIRE = { x: -0.85, y: 3.87, z: 6.07 }
+
 const LEGS = {
   nose: {
-    x: 12.0,
+    x: VISUAL_NOSE_TIRE.x,
     y: 0,
-    z: 5.0,
+    z: VISUAL_NOSE_TIRE.z,
     springStages: NOSE_GEAR_SPRING_STAGES,
     dampingCompression: NOSE_GEAR_DAMPING_COMPRESSION,
     dampingExtension: NOSE_GEAR_DAMPING_EXTENSION,
@@ -212,9 +241,9 @@ const LEGS = {
     steerable: true,
   },
   mainL: {
-    x: -3.5,
-    y: -4.55,
-    z: 5.8,
+    x: VISUAL_MAIN_TIRE.x,
+    y: -VISUAL_MAIN_TIRE.y,
+    z: VISUAL_MAIN_TIRE.z,
     springStages: MAIN_GEAR_SPRING_STAGES,
     dampingCompression: MAIN_GEAR_DAMPING_COMPRESSION,
     dampingExtension: MAIN_GEAR_DAMPING_EXTENSION,
@@ -222,15 +251,31 @@ const LEGS = {
     steerable: false,
   },
   mainR: {
-    x: -3.5,
-    y: 4.55,
-    z: 5.8,
+    x: VISUAL_MAIN_TIRE.x,
+    y: VISUAL_MAIN_TIRE.y,
+    z: VISUAL_MAIN_TIRE.z,
     springStages: MAIN_GEAR_SPRING_STAGES,
     dampingCompression: MAIN_GEAR_DAMPING_COMPRESSION,
     dampingExtension: MAIN_GEAR_DAMPING_EXTENSION,
     braked: true,
     steerable: false,
   },
+}
+
+/* Nosewheel steering authority, degrees, at a given ground speed (ft/s).
+   Full NOSEWHEEL_STEER_MAX at taxi speeds, narrowing as speed builds so
+   that a full pedal input never asks for a tighter turn than
+   NOSEWHEEL_MAX_LATERAL_ACCEL - left unlimited, a nosewheel turn at landing
+   speeds pulls far more sideways g than the narrow main gear track can
+   take, and rolls the aircraft over. The turn a steered nosewheel makes is
+   set by the wheelbase: radius = wheelbase / tan(steer angle). */
+const WHEELBASE = VISUAL_NOSE_TIRE.x - VISUAL_MAIN_TIRE.x
+
+export function noseSteerAuthority(groundSpeed) {
+  const maxLateralAccel = SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL * SimulationConstants.G
+  const speedLimited = Math.atan((maxLateralAccel * WHEELBASE) / Math.max(groundSpeed * groundSpeed, 1e-6))
+
+  return Math.min(SimulationConstants.NOSEWHEEL_STEER_MAX, speedLimited * SimulationConstants.RTOD)
 }
 
 export default class LandingGearModel {
@@ -240,6 +285,35 @@ export default class LandingGearModel {
        model doesn't and shouldn't). Starts low enough that nothing can be
        in contact with it before the caller has set a real value. */
     this.groundAlt = -1e6
+
+    /* whether any leg was on the ground at the last update */
+    this.weightOnWheels = false
+  }
+
+  /**
+   * How far each leg's strut is compressed, for animating the visual gear,
+   * which shows the struts fully extended - zero with the wheel off the
+   * ground.
+   *
+   * @param x  aircraft state - only altitude and attitude are used
+   * @returns {nose, mainL, mainR}  strut travel, ft
+   */
+  strutTravel(x) {
+    const { q0, q1, q2, q3 } = x
+
+    // the "down" row of the body -> earth rotation matrix, as in update()
+    const r20 = 2 * (q1 * q3 - q0 * q2)
+    const r21 = 2 * (q2 * q3 + q0 * q1)
+    const r22 = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+
+    const travel = {}
+
+    for (const [name, leg] of Object.entries(LEGS)) {
+      const legAlt = x.alt - (r20 * leg.x + r21 * leg.y + r22 * leg.z)
+      travel[name] = Math.max(0, this.groundAlt - legAlt)
+    }
+
+    return travel
   }
 
   /**
@@ -264,6 +338,8 @@ export default class LandingGearModel {
     let M = 0
     let N = 0
 
+    this.weightOnWheels = false
+
     if (gear <= 0) return { X, Y, Z, L, M, N }
 
     for (const leg of Object.values(LEGS)) {
@@ -276,6 +352,8 @@ export default class LandingGearModel {
 
       const penetration = this.groundAlt - legAlt
       if (penetration <= 0) continue
+
+      this.weightOnWheels = true
 
       // velocity of this point on the rigid body = CG velocity + (angular
       // rate) x (offset) - the standard rigid-body point-velocity relation,
@@ -321,9 +399,12 @@ export default class LandingGearModel {
       const rollingCoeff = leg.braked
         ? ROLLING_FRICTION_COEFF + brake * (SimulationConstants.BRAKE_FRICTION_COEFF_MAX - ROLLING_FRICTION_COEFF)
         : ROLLING_FRICTION_COEFF
+      const rollRampVelocity = leg.braked
+        ? FRICTION_VELOCITY_EPS + brake * (BRAKED_FRICTION_VELOCITY_EPS - FRICTION_VELOCITY_EPS)
+        : FRICTION_VELOCITY_EPS
       const steerAngle = leg.steerable ? noseSteerRad : 0
 
-      const tire = tireForce(pointU, pointV, upForce, rollingCoeff, steerAngle)
+      const tire = tireForce(pointU, pointV, upForce, rollingCoeff, rollRampVelocity, steerAngle)
 
       X += legX + tire.x
       Y += legY + tire.y

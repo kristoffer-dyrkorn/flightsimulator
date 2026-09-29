@@ -151,7 +151,7 @@ const PITCH_LAG = (4 * SPAN) / Math.PI
 const YAW_LAG = (3 * SPAN) / Math.PI
 
 /* Time constant, seconds, on the height above ground the eddy sizes are worked
-   out from.
+   out from, and on the airspeed the filters are discretized against.
 
    The filters below are discretized against the aircraft's own time scale, and
    they are only well behaved while that scale moves slowly compared to the
@@ -168,8 +168,14 @@ const YAW_LAG = (3 * SPAN) / Math.PI
    flying through does not reorganize its eddies the instant the ground drops
    away either.
 
-   Airspeed is not lagged. It comes out of the integrator, so it cannot jump. */
+   Airspeed needs the same. It comes out of the integrator, so it can't jump,
+   but it isn't smooth either: it carries the gusts themselves, and moves a
+   little from one step to the next. Fed straight in, that step to step
+   jitter keeps nudging every coefficient, and the stored history drifts off
+   like a random walk - gusts of 80 ft/s and more within seconds of the
+   aircraft slowing down in moderate turbulence. */
 const HEIGHT_LAG = 3.0
+const AIRSPEED_LAG = 3.0
 
 /* The bilinear transform of x^i for a filter of degree n, as a polynomial in
    z^-1 after numerator and denominator have both been multiplied through by
@@ -351,6 +357,9 @@ export default class TurbulenceModel {
     /* lagged height above ground, ft. Null until the first step, which seeds it
        rather than easing towards it from nowhere. */
     this.smoothedHeight = null
+
+    /* lagged airspeed, ft/s, seeded the same way */
+    this.smoothedAirspeed = null
   }
 
   /**
@@ -379,7 +388,15 @@ export default class TurbulenceModel {
       return
     }
 
-    const v = Math.max(airspeed, MIN_AIRSPEED)
+    const measuredAirspeed = Math.max(airspeed, MIN_AIRSPEED)
+
+    if (this.smoothedAirspeed === null) {
+      this.smoothedAirspeed = measuredAirspeed
+    } else {
+      this.smoothedAirspeed += (measuredAirspeed - this.smoothedAirspeed) * (1 - Math.exp(-dt / AIRSPEED_LAG))
+    }
+
+    const v = this.smoothedAirspeed
 
     const measured = Math.max(height, MIN_HEIGHT)
 
@@ -537,9 +554,10 @@ export default class TurbulenceModel {
     this.u = this.v = this.w = 0
     this.p = this.q = this.r = 0
 
-    /* seed the height again on the way back in, rather than easing over from
-       wherever the aircraft was when it was switched off */
+    /* seed the height and airspeed again on the way back in, rather than
+       easing over from wherever the aircraft was when it was switched off */
     this.smoothedHeight = null
+    this.smoothedAirspeed = null
 
     this.uFilter.reset()
     this.vFilter.reset()

@@ -1,6 +1,7 @@
 import SimulationConstants from "../simulationconstants.js"
 import AtmosphericModel from "./atmosphericmodel.js"
 import CompressibilityModel from "./compressibilitymodel.js"
+import { noseSteerAuthority } from "./landinggearmodel.js"
 
 /**
  * F-16 flight control system.
@@ -90,6 +91,48 @@ const ALPHA_LIMIT_LEAD = 0.25 /* seconds of angle of attack rate lead */
 const ALPHA_LIMIT_NZ_FLOOR = 0.0 /* lowest g the limiter alone may command */
 const ALPHA_RATE_TAU = 0.2 /* seconds, smoothing on the differentiated AoA */
 
+/* airspeeds on the ground, knots, over which the angle of attack is faded
+   in - see groundVaneFade */
+const GROUND_VANE_IGNORED_KT = 30
+const GROUND_VANE_VALID_KT = 60
+
+/* Landing mode. With the gear handle down the real F-16 switches to its
+   take-off and landing gains, and with the stick centred it trims itself to
+   the on-speed approach angle of attack, 13 degrees. That makes it speed
+   stable on an approach the way a conventional aircraft is: it holds the
+   angle of attack, the speed follows from it, and the pilot sets the glide
+   path with the throttle - more power to flatten it, less to steepen it.
+
+   Holding the angle of attack directly with the g loop leaves the phugoid -
+   the slow exchange of speed and height - almost undamped: lowering the
+   gear at 300 kt zooms the jet up until it stalls. So it's done as two
+   loops instead. The inner one holds a flight path, which it damps well.
+   The outer one slowly moves that flight path to hold 13 degrees: up when
+   the angle of attack is below it (too fast, so climb and slow down), down
+   when it is above it (too slow). Its gains make it about critically damped,
+   and several times slower than the inner loop. The stick moves the
+   flight path directly while it is off centre, and the outer loop brings
+   the angle of attack back to 13 degrees once it is released.
+
+   Everything ends up as a g command, capped at LANDING_NZ_MAX so lowering
+   the gear well above approach speed eases the nose up rather than pulling
+   hard, and the angle of attack limiter below still applies. The flight
+   path is the one over the ground, as a glide path is. */
+const LANDING_AOA = 13 /* deg held with the stick centred */
+const LANDING_AOA_PATH_P = 8 /* deg of flight path per deg of angle of attack error */
+const LANDING_AOA_PATH_I = 0.8 /* deg/s of flight path per deg of angle of attack error */
+
+/* How steep a climb or descent the angle of attack hold may ask for. The
+   climb is kept small, so lowering the gear above approach speed slows the
+   jet down nearly level instead of pitching the nose well up. The descent has to
+   allow for gliding at idle with the gear and speedbrakes out, which at 13
+   degrees takes a flight path of nearly 20 degrees down. */
+const LANDING_PATH_CLIMB_MAX = 2 /* deg */
+const LANDING_PATH_DESCENT_MAX = 20 /* deg */
+const LANDING_PATH_RATE_MAX = 12 /* deg/s of flight path change at full stick */
+const LANDING_PATH_GAIN = 1.0 /* deg/s of flight path rate per deg of flight path error */
+const LANDING_NZ_MAX = 2.0 /* most g landing mode may pull */
+
 /* Roll channel. The gain is high enough that full lateral stick puts the
    ailerons on their stops, so that a full roll command gets the roll rate the
    airframe actually has rather than the lower one the loop gain would settle
@@ -167,6 +210,7 @@ export default class FlightControlSystem {
       aileron: SimulationConstants.AILERON_TRIM,
       rudder: 0,
       lef: 0,
+      tef: 0,
       speedbrake: 0,
       gear: 0,
       brake: 0,
@@ -191,6 +235,27 @@ export default class FlightControlSystem {
 
     /* true while the angle of attack limiter is overriding the pilot */
     this.alphaLimiterActive = false
+
+    /* landing mode: whether it was on last update, and the integral part of
+       the flight path it is holding, degrees */
+    this.landingMode = false
+    this.landingPathIntegral = 0
+  }
+
+  /**
+   * How much of the measured angle of attack to believe. Taxiing or
+   * standing still, the air hardly moves past the vane, and whatever wind
+   * there is swings it through tens of degrees - numbers that mean nothing
+   * for a wing that isn't flying, and that the limiter and the flap schedule
+   * shouldn't react to. So on the ground it is faded out below
+   * GROUND_VANE_VALID_KT, down to nothing at GROUND_VANE_IGNORED_KT. In the
+   * air it is always believed, however slow.
+   */
+  groundVaneFade(x, weightOnWheels) {
+    if (!weightOnWheels) return 1
+
+    const knots = x.airspeed * SimulationConstants.FEET_PER_SECOND_TO_KNOTS
+    return limit((knots - GROUND_VANE_IGNORED_KT) / (GROUND_VANE_VALID_KT - GROUND_VANE_IGNORED_KT), 0, 1)
   }
 
   /**
@@ -199,9 +264,14 @@ export default class FlightControlSystem {
    * @param input  pilot input - stick and pedal in -1..1, throttle in 0..1
    * @param x      current aircraft state
    * @param dt     seconds since the last call
+   * @param weightOnWheels  true while any wheel is on the ground
    */
-  update(input, x, dt) {
-    const alpha = x.alpha * SimulationConstants.RTOD
+  update(input, x, dt, weightOnWheels = false) {
+    /* the angle of attack the aircraft's vane reads, against the air - the
+       limiter and the flap schedule are about what the wing is doing, and in
+       a wind that isn't the angle against the velocity over the ground */
+    const airAlpha = x.airAlpha * this.groundVaneFade(x, weightOnWheels)
+    const alpha = airAlpha * SimulationConstants.RTOD
     const p = x.p * SimulationConstants.RTOD
     const q = x.q * SimulationConstants.RTOD
     const r = x.r * SimulationConstants.RTOD
@@ -244,10 +314,55 @@ export default class FlightControlSystem {
        g limiter: because the loop below tracks the command, bounding what can be
        asked for bounds what the aircraft does, and pulling harder on a stick
        that is already on its stop achieves nothing. */
-    const nzStickCommand =
+    let nzStickCommand =
       input.pitchStick >= 0
         ? 1 + input.pitchStick * (SimulationConstants.NZ_MAX - 1)
         : 1 + input.pitchStick * (1 - SimulationConstants.NZ_MIN)
+
+    /* Landing mode - see LANDING_AOA. Only in the air: rotating on the
+       runway is a pivot about the main wheels, which a g command drives far
+       better, and after touchdown the nose shouldn't be held up. Entering
+       the mode, at lift off or when the gear goes down, starts from the
+       flight path the aircraft is already on. */
+    const landingMode = input.gear > 0 && !weightOnWheels
+    if (landingMode) {
+      const climbRate = -x.sinkRate / 60 // ft/s
+      const flightPath = Math.asin(limit(climbRate / Math.max(x.vt, 1), -1, 1)) * SimulationConstants.RTOD
+      const pathRateCommand = input.pitchStick * LANDING_PATH_RATE_MAX
+      const aoaError = LANDING_AOA - alpha
+
+      // start from the flight path the aircraft is already on
+      if (!this.landingMode) this.landingPathIntegral = flightPath - LANDING_AOA_PATH_P * aoaError
+
+      this.landingPathIntegral = limit(
+        this.landingPathIntegral + (LANDING_AOA_PATH_I * aoaError + pathRateCommand) * dt,
+        -LANDING_PATH_DESCENT_MAX,
+        LANDING_PATH_CLIMB_MAX,
+      )
+
+      const pathTarget = limit(
+        this.landingPathIntegral + LANDING_AOA_PATH_P * aoaError,
+        -LANDING_PATH_DESCENT_MAX,
+        LANDING_PATH_CLIMB_MAX,
+      )
+
+      // while the target is held at a limit, keep the integral where it
+      // puts the target exactly on that limit - otherwise it winds up
+      // against it, and the flight path overshoots once the angle of
+      // attack comes back
+      this.landingPathIntegral = pathTarget - LANDING_AOA_PATH_P * aoaError
+      const pathRate = pathRateCommand + LANDING_PATH_GAIN * (pathTarget - flightPath)
+
+      // holding the flight path against gravity takes cos(flight path) g,
+      // and turning it at that rate takes this much more
+      nzStickCommand = limit(
+        Math.cos(flightPath * SimulationConstants.DTOR) +
+          (x.vt * pathRate * SimulationConstants.DTOR) / SimulationConstants.G,
+        0,
+        LANDING_NZ_MAX,
+      )
+    }
+    this.landingMode = landingMode
 
     /* Rate of change of angle of attack, by washout filter: the lag trails a
        ramp by exactly one time constant, so the difference divided by the time
@@ -335,7 +450,7 @@ export default class FlightControlSystem {
        body z axis. At low angle of attack the two are nearly the same; at high
        angle of attack they are far apart, and feeding back body yaw rate there
        is how a damper ends up driving a departure instead of preventing one. */
-    const rStability = r * Math.cos(x.alpha) - p * Math.sin(x.alpha)
+    const rStability = r * Math.cos(airAlpha) - p * Math.sin(airAlpha)
 
     this.yawRateLowPass += ((rStability - this.yawRateLowPass) * dt) / YAW_WASHOUT_TAU
     const rWashedOut = rStability - this.yawRateLowPass
@@ -350,7 +465,7 @@ export default class FlightControlSystem {
       -input.yawPedal * SimulationConstants.RUDDER_MAX +
       YAW_R_D * rWashedOut * lateralScale +
       YAW_NY_P * x.ny * lateralScale -
-      YAW_ARI * input.rollStick * Math.sin(x.alpha) * SimulationConstants.RUDDER_MAX
+      YAW_ARI * input.rollStick * Math.sin(airAlpha) * SimulationConstants.RUDDER_MAX
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
        leading edge flaps, and the pass-through controls
@@ -366,6 +481,24 @@ export default class FlightControlSystem {
       SimulationConstants.LEF_MIN,
       SimulationConstants.LEF_MAX,
     )
+
+    /* Trailing edge flaps, also scheduled rather than flown: fully down with
+       the gear handle down, and otherwise down at low speed and retracting
+       as it builds - see TEF_MAX. The schedule is on calibrated airspeed,
+       which at these speeds is the equivalent airspeed dynamic pressure
+       works out to. */
+    const kcas =
+      Math.sqrt((2 * this.atmosphericModel.qbar) / SimulationConstants.SEA_LEVEL_DENSITY) * SimulationConstants.FEET_PER_SECOND_TO_KNOTS
+    this.commands.tef =
+      input.gear > 0
+        ? SimulationConstants.TEF_MAX
+        : SimulationConstants.TEF_MAX *
+          limit(
+            (SimulationConstants.TEF_UP_ABOVE_KCAS - kcas) /
+              (SimulationConstants.TEF_UP_ABOVE_KCAS - SimulationConstants.TEF_FULL_BELOW_KCAS),
+            0,
+            1,
+          )
 
     this.commands.throttle = input.throttle
 
@@ -395,7 +528,8 @@ export default class FlightControlSystem {
        unconditional here: landinggearmodel.js only turns this into an
        actual force while the nose leg is in contact with the ground, which
        is the same thing as "weight on the nose gear" - there's no need to
-       gate it a second time here. */
-    this.commands.noseSteer = input.yawPedal * SimulationConstants.NOSEWHEEL_STEER_MAX
+       gate it a second time here. Full pedal gets the full steering
+       authority available at the current ground speed. */
+    this.commands.noseSteer = input.yawPedal * noseSteerAuthority(x.vt)
   }
 }

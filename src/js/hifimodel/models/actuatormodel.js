@@ -70,6 +70,17 @@ const SURFACES = [
     max: SimulationConstants.LEF_MAX,
   },
   {
+    // trailing edge flaps - the flaperons lowered together (flaperons.js
+    // mixes them with the aileron). The same fast actuators as the
+    // aileron move them, but the flap schedule is followed at a gentler
+    // rate, so the lift change as they come down is gradual.
+    name: "tef",
+    rate: 10,
+    tau: 1 / 20.2,
+    min: 0,
+    max: SimulationConstants.TEF_MAX,
+  },
+  {
     name: "speedbrake",
     rate: 30,
     tau: 1 / 20.2,
@@ -126,6 +137,7 @@ export default class ActuatorModel {
     this.aileron = SimulationConstants.AILERON_TRIM
     this.rudder = 0
     this.lef = 0
+    this.tef = 0
     this.speedbrake = 0
     this.gear = 0 // starts up, matching the sim's own starting state
     this.brake = 0

@@ -1,5 +1,11 @@
 import { MathUtils } from "three"
 
+// on the ground, knots - see update()
+const GROUND_SPEED_BELOW_KT = 40
+const AIRSPEED_ABOVE_KT = 80
+const AOA_SHOWN_ABOVE_KT = 40
+const FLIGHT_PATH_SHOWN_ABOVE_KT = 10
+
 export default class HUDObject {
   constructor(canvas) {
     this.canvas = canvas
@@ -43,15 +49,29 @@ export default class HUDObject {
    *                       psi is measured against grid north, so this converts
    *                       it to a true heading.
    */
-  update(airplaneState, airplaneControlInput, atmosphericModel, compassOffset) {
+  update(airplaneState, airplaneControlInput, atmosphericModel, compassOffset, weightOnWheels = false) {
     this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi + compassOffset)
 
     // wrap into 0..359
     this.heading = ((this.heading % 360) + 360) % 360
 
     // airspeed, as an airspeed indicator reads: what the aircraft is doing
-    // through the air, not over the ground
-    this.speed = Math.round(0.592484 * airplaneState.airspeed)
+    // through the air, not over the ground. On the ground at taxi speeds
+    // that is mostly the wind, so there it shows ground speed instead -
+    // blended over to airspeed between GROUND_SPEED_BELOW_KT and
+    // AIRSPEED_ABOVE_KT, so it never jumps by the wind speed on a take off
+    // roll, and reads zero when the aircraft is standing still
+    const airspeed = 0.592484 * airplaneState.airspeed
+    const groundSpeed = 0.592484 * airplaneState.vt
+    const blend = weightOnWheels
+      ? MathUtils.clamp((groundSpeed - GROUND_SPEED_BELOW_KT) / (AIRSPEED_ABOVE_KT - GROUND_SPEED_BELOW_KT), 0, 1)
+      : 1
+    this.speed = Math.round(groundSpeed + blend * (airspeed - groundSpeed))
+
+    // standing still or taxiing slowly, an angle of attack vane just swings
+    // about in whatever wind there is, and the flight path is undefined
+    this.showAoa = !weightOnWheels || airspeed >= AOA_SHOWN_ABOVE_KT
+    this.showFlightPath = groundSpeed >= FLIGHT_PATH_SHOWN_ABOVE_KT
     this.mach = atmosphericModel.rmach.toFixed(2)
     this.altitude = Math.round(airplaneState.alt)
 
@@ -62,7 +82,14 @@ export default class HUDObject {
     this.throttle = Math.round(100 * airplaneControlInput.throttle)
     this.pitch = airplaneState.theta
     this.roll = airplaneState.phi
-    this.aoa = airplaneState.alpha
+    // angle of attack against the air, as the aircraft's vane reads it
+    this.aoa = airplaneState.airAlpha
+
+    // the flight path marker shows where the aircraft is actually going, so
+    // it sits at the angle between the nose and the velocity over the
+    // ground - not the angle of attack, which in gusty air jumps around
+    // with every gust while the flight path itself hardly changes
+    this.flightPathAngle = airplaneState.alpha
 
     this.g = airplaneState.nz
 
@@ -184,7 +211,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = MathUtils.RAD2DEG * this.aoa * 28
+    const offset = MathUtils.RAD2DEG * this.flightPathAngle * 28
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
@@ -212,7 +239,7 @@ export default class HUDObject {
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
-    const aoaText = Math.round(this.aoa * MathUtils.RAD2DEG)
+    const aoaText = this.showAoa ? Math.round(this.aoa * MathUtils.RAD2DEG) : "--"
 
     this.ctx.fillText(`AOA ${aoaText}`, 30, 0.82 * this.height)
     this.ctx.fillText(`M ${this.mach}`, 30, 0.86 * this.height)
@@ -227,6 +254,6 @@ export default class HUDObject {
     this.ctx.fillText(`${gText}G`, 30, 0.2 * this.height)
 
     this.drawPitchLadder()
-    this.drawFlightPathMarker()
+    if (this.showFlightPath) this.drawFlightPathMarker()
   }
 }

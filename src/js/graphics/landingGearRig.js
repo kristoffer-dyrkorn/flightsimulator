@@ -177,6 +177,7 @@ export default class LandingGearRig {
   constructor(object) {
     this.legs = []
     this.wheels = {}
+    this.steering = null
 
     for (const config of LEG_CONFIGS) {
       const wheel = object.getObjectByName(config.wheelName)
@@ -274,7 +275,41 @@ export default class LandingGearRig {
         }
       }
 
-      this.legs.push({ config, doorPivot, doorHingeAxisLocal, strutMeshes })
+      // strut travel moves the whole leg straight up along the aircraft's
+      // own vertical axis - there's no separate sliding piece in the mesh,
+      // so the top of the strut just disappears further into the belly.
+      // Each mesh gets that axis in its own parent's frame, scaled to one
+      // meter of travel, so update() only has to add a multiple of it.
+      object.updateWorldMatrix(true, true)
+      const upWorld = new Vector3(0, 0, 1).transformDirection(object.parent.matrixWorld)
+      const travelMeshes = strutMeshes.map((mesh) => {
+        const worldPos = mesh.getWorldPosition(new Vector3())
+        const raised = mesh.parent.worldToLocal(worldPos.clone().add(upWorld))
+
+        return {
+          mesh,
+          basePosition: mesh.position.clone(),
+          upPerMeter: raised.sub(mesh.parent.worldToLocal(worldPos)),
+        }
+      })
+
+      this.legs.push({ config, doorPivot, doorHingeAxisLocal, strutMeshes, travelMeshes })
+
+      // the nosewheel turns with the steering, about the aircraft's own
+      // vertical axis through the wheel's center (the wheel mesh's origin).
+      // That axis is fixed in the wheel's parent frame, so it's worked out
+      // once here, the same way as the door hinge axes above.
+      if (config.name === "nose") {
+        object.updateWorldMatrix(true, true)
+        const upWorld = new Vector3(0, 0, 1).transformDirection(object.parent.matrixWorld)
+        const worldToParent = new Matrix4().copy(wheel.parent.matrixWorld).invert()
+
+        this.steering = {
+          wheel,
+          axis: upWorld.transformDirection(worldToParent),
+          baseQuaternion: wheel.quaternion.clone(),
+        }
+      }
     }
   }
 
@@ -284,15 +319,24 @@ export default class LandingGearRig {
    *                      model already uses for gear drag (ActuatorModel's
    *                      "gear" surface), not the pilot's raw instant
    *                      gear-handle command
+   * @param noseSteer     nosewheel steering angle, degrees, positive right
+   * @param strutTravel   {nose, mainL, mainR}, meters each leg's strut is
+   *                      compressed (see LandingGearModel.strutTravel)
    */
-  update(gearPosition) {
+  update(gearPosition, noseSteer = 0, strutTravel = null) {
     const doorOpen = doorOpenness(gearPosition)
     const legsVisible = gearPosition > LEG_VISIBLE_ABOVE
 
     for (const leg of this.legs) {
-      const { config, doorPivot, doorHingeAxisLocal, strutMeshes } = leg
+      const { config, doorPivot, doorHingeAxisLocal, strutMeshes, travelMeshes } = leg
 
       for (const mesh of strutMeshes) mesh.visible = legsVisible
+
+      // the model shows the leg fully extended, so it only ever moves up
+      const travel = Math.max(0, strutTravel?.[config.name] ?? 0)
+      for (const { mesh, basePosition, upPerMeter } of travelMeshes) {
+        mesh.position.copy(basePosition).addScaledVector(upPerMeter, travel)
+      }
 
       if (doorPivot) {
         // an arbitrary axis (the door's own real hinge-edge direction, not
@@ -304,6 +348,13 @@ export default class LandingGearRig {
         const angle = config.doorSign * MathUtils.degToRad(config.doorAngleDeg) * doorOpen
         doorPivot.quaternion.setFromAxisAngle(doorHingeAxisLocal, angle)
       }
+    }
+
+    if (this.steering) {
+      // positive steering turns the wheel right, which is a negative
+      // rotation about the upward axis
+      const { wheel, axis, baseQuaternion } = this.steering
+      wheel.quaternion.setFromAxisAngle(axis, -MathUtils.degToRad(noseSteer)).multiply(baseQuaternion)
     }
   }
 }

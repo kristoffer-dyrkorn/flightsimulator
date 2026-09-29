@@ -2,27 +2,11 @@ import SimulationConstants from "./simulationconstants.js"
 
 const CONTROL_CENTERING_PER_SECOND = Math.pow(0.98, 60)
 
-// brakes don't have a return spring the way a stick or rudder pedal does
-// - a real toe brake stays wherever the pilot's foot left it, it doesn't
-// snap back to zero on its own. Sharing CONTROL_CENTERING_PER_SECOND (see
-// below - decays to ~30% within a single second) meant a brake tap decayed
-// away almost as fast as it could be pressed: with no way to hold the
-// pedal down continuously (BRAKE_STEP-per-keypress only, no analog input),
-// repeated taps could never build sustained pressure, so the brakes never
-// did anything to a landing roll. This still decays - so a single
-// long-forgotten tap doesn't leave the brakes stuck on forever - just
-// gently (~90% retained per second) rather than snapping back like a
-// spring-loaded control.
-const BRAKE_CENTERING_PER_SECOND = 0.9
-
 // how far one keypress moves the stick, fraction of full travel
 export const STICK_STEP = 0.05
 
 // how far one keypress moves the throttle, fraction of full travel
 export const THROTTLE_STEP = 0.01
-
-// how far one keypress moves the brake pedal, fraction of full travel
-export const BRAKE_STEP = 0.1
 
 // how fast the throttle lever itself can move, fraction of full travel per
 // second - independent of THROTTLE_STEP (how far one keypress asks it to go)
@@ -43,11 +27,18 @@ export default class InputVector {
 
     this.speedbrake = 0 // degrees
     this.gear = 0 // 0 = up, 1 = down - a switch, not an axis, so no centering below
-    this.brake = 0 // 0..1, wheel brake pedal - decays slowly, not spring-centered like the stick/rudder below (see BRAKE_CENTERING_PER_SECOND)
+    this.brake = 0 // 0..1, wheel brake pedal - held down by the pilot, so no centering below
     this.internalView = true
   }
 
-  normalizeControls(dt) {
+  /**
+   * @param dt              seconds since the last call
+   * @param weightOnWheels  true while any wheel is on the ground - the pedals
+   *                        then steer the nosewheel, and stay where they
+   *                        were put rather than centring, so a taxi turn
+   *                        holds until the pilot takes it out again
+   */
+  normalizeControls(dt, weightOnWheels = false) {
     this.targetThrottle = this.limiter(
       this.targetThrottle,
       SimulationConstants.THROTTLE_MIN,
@@ -78,8 +69,7 @@ export default class InputVector {
 
     this.pitchStick *= centering
     this.rollStick *= centering
-    this.yawPedal *= centering
-    this.brake *= Math.pow(BRAKE_CENTERING_PER_SECOND, dt)
+    if (!weightOnWheels) this.yawPedal *= centering
   }
 
   limiter(value, min, max) {

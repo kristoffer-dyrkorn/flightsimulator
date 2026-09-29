@@ -2,6 +2,8 @@ export default class SimulationConstants {}
 
 SimulationConstants.FEET_TO_METERS = 0.3048
 SimulationConstants.METERS_TO_FEET = 3.28084
+SimulationConstants.FEET_PER_SECOND_TO_KNOTS = 0.592484
+SimulationConstants.SEA_LEVEL_DENSITY = 0.002377 // slug/ft^3
 
 SimulationConstants.ALTITUDE_MIN = 0
 SimulationConstants.ALTITUDE_MAX = 50000
@@ -44,6 +46,24 @@ SimulationConstants.AILERON_TRIM = -0.085
 SimulationConstants.LEF_MIN = 0
 SimulationConstants.LEF_MAX = 25
 
+/* Trailing edge flaps - the flaperons lowered together (see flaperons.js).
+   The flight control system schedules them, there's no flap lever: fully
+   down with the gear handle down, and with it up, fully down below about
+   240 KCAS and retracting to fully up by about 370 KCAS. That schedule is
+   from pilot and training material, not from the flight manual itself.
+
+   The NASA wind tunnel data behind the rest of the aerodynamics (TP-1538)
+   has nothing for the flaperons lowered together, so the lift and drag they
+   add are estimates: the ones the JSBSim F-16 model uses (per radian of
+   flap), which are plausible for a plain part span flap on a wing of this
+   shape but aren't measured F-16 data. There is no pitching moment term -
+   the flight control system trims out whatever change there would be. */
+SimulationConstants.TEF_MAX = 20 // degrees
+SimulationConstants.TEF_FULL_BELOW_KCAS = 240
+SimulationConstants.TEF_UP_ABOVE_KCAS = 370
+SimulationConstants.TEF_CL_PER_RAD = 0.35
+SimulationConstants.TEF_CD_PER_RAD = 0.08
+
 SimulationConstants.SPEEDBRAKE_MIN = 0
 SimulationConstants.SPEEDBRAKE_MAX = 60
 
@@ -77,20 +97,19 @@ SimulationConstants.GEAR_TRANSITION_TIME = 6 // seconds for a full up/down cycle
 SimulationConstants.GEAR_DRAG = 0.027
 
 /* Wheel brakes, main gear only - the F-16's nosewheel is steered, not
-   braked. BRAKE_FRICTION_COEFF_MAX is a typical dry-pavement aircraft brake
-   friction coefficient at the anti-skid limit (published ranges run
-   roughly 0.3-0.5); full pedal application blends the main gear's rolling
-   friction, in landinggearmodel.js, up from its unbraked coefficient to
-   this one. */
-SimulationConstants.BRAKE_FRICTION_COEFF_MAX = 0.4
+   braked. BRAKE_FRICTION_COEFF_MAX is the friction coefficient full pedal
+   gets out of an anti-skid brake on a dry runway (peak tire grip there is
+   roughly 0.7-0.8, and anti-skid holds the tire just short of it); full
+   pedal application blends the main gear's rolling friction, in
+   landinggearmodel.js, up from its unbraked coefficient to this. */
+SimulationConstants.BRAKE_FRICTION_COEFF_MAX = 0.6
 
-/* Nosewheel steering authority available from the rudder pedals alone (the
-   real system's "low gain"/pedal-steering mode). The real aircraft also has
-   a much larger-throw, handle-operated "high gain" mode for tight ground
-   manoeuvring, which isn't modeled here since there's no separate control
-   for it - this is an estimate for pedal-only authority, not a published
-   figure. */
-SimulationConstants.NOSEWHEEL_STEER_MAX = 6 // degrees
+/* Nosewheel steering authority at full pedal, the real aircraft's +-32
+   degrees. That is only available at taxi speeds: it narrows with ground
+   speed so a full pedal input never asks for a turn pulling more than
+   NOSEWHEEL_MAX_LATERAL_ACCEL (in g) - see landinggearmodel.js. */
+SimulationConstants.NOSEWHEEL_STEER_MAX = 32 // degrees
+SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL = 0.3
 
 /* Ground-contact detection (index.js's collision check) - how a gear-down
    touch is told apart from a crash. There's no structural gear model yet

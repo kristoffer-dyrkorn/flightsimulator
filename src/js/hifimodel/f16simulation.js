@@ -4,6 +4,7 @@ import CompressibilityModel from "./models/compressibilitymodel.js"
 import TurbulenceModel from "./models/turbulencemodel.js"
 import WindModel from "./models/windmodel.js"
 import LandingGearModel from "./models/landinggearmodel.js"
+import { mixFlaperons } from "./flaperons.js"
 import StateVector from "./statevector.js"
 import SimulationConstants from "./simulationconstants.js"
 import {
@@ -159,7 +160,12 @@ export default class F16Simulation {
 
     const T = this.engineModel.thrust
     const el = u.elevator
-    const ail = u.aileron
+
+    /* the flaperons are both ailerons and flaps, sharing the same travel -
+       see flaperons.js */
+    const flaperons = mixFlaperons(u.aileron, u.tef)
+    const ail = flaperons.aileron
+    const tefRad = flaperons.flap * SimulationConstants.DTOR
     const stabDiff = u.stabilatorDiff
     const rud = u.rudder
     const spbr = u.speedbrake
@@ -311,8 +317,13 @@ export default class F16Simulation {
        how fast the visual model shows or hides it */
     const CD_gear = SimulationConstants.GEAR_DRAG * u.gear
 
-    const CD_mach = CD + this.compressibilityModel.waveDrag + CD_gear
-    const CL_mach = CL * this.compressibilityModel.liftFactor
+    /* the trailing edge flaps aren't in the tunnel data either - see
+       TEF_CL_PER_RAD for where these increments come from */
+    const CL_tef = SimulationConstants.TEF_CL_PER_RAD * tefRad
+    const CD_tef = SimulationConstants.TEF_CD_PER_RAD * tefRad
+
+    const CD_mach = CD + this.compressibilityModel.waveDrag + CD_gear + CD_tef
+    const CL_mach = (CL + CL_tef) * this.compressibilityModel.liftFactor
 
     const Cx_mach = -CD_mach * caAero + CL_mach * saAero
     const Cz_mach = -CD_mach * saAero - CL_mach * caAero
@@ -420,6 +431,7 @@ export default class F16Simulation {
        any other way: in a wind the speed over the ground the state carries is
        not the speed through the air. */
     xd.airspeed = vta
+    xd.airAlpha = alphaAero
 
     /* altdot above is the rate of climb, ft/sec, positive = climbing. Sink
        rate is instrument convention for the same thing the other way up,

@@ -18,18 +18,20 @@ import {
   Vector3,
   Quaternion,
   LoadingManager,
+  PCFSoftShadowMap,
 } from "three"
 import { MTLLoader } from "three/addons/loaders/MTLLoader.js"
 import { OBJLoader } from "three/addons/loaders/OBJLoader.js"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
-import InputVector, { STICK_STEP, THROTTLE_STEP, BRAKE_STEP } from "./hifimodel/inputvector.js"
+import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
 import FlightControlSystem from "./hifimodel/models/flightcontrolsystem.js"
 import RungeKutta4 from "./hifimodel/integrator.js"
 import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
+import GroundShadow from "./graphics/GroundShadow.js"
 import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
 import LandingGearRig from "./graphics/landingGearRig.js"
 import Gamepad from "./controller/gamepad.js"
@@ -100,10 +102,10 @@ let gearDown = false
 // true once the aircraft has been judged down safely and is rolling on the
 // ground, rather than still flying - see the ground collision check below.
 // Persists across ticks so a landing, once judged safe, isn't re-litigated
-// every 200ms against criteria (sink rate, bank, being over a mapped
-// runway polygon) that only mean something at the instant of touchdown -
-// a taxiing aircraft bumping over an uneven surface shouldn't have to
-// re-earn its landing every fifth of a second. Cleared the moment the
+// every 200ms against criteria (sink rate, bank) that only mean something
+// at the instant of touchdown - a taxiing aircraft bumping over an uneven
+// surface shouldn't have to re-earn its landing every fifth of a second.
+// Staying on the runway is still checked on every tick, though. Cleared the moment the
 // wheels lift clear of the ground again, so a bounce, a go-around, or a
 // subsequent takeoff all require a fresh safe touch of their own.
 let onGround = false
@@ -119,12 +121,17 @@ let paused = false
 // ray for intersection testing with ground, direction is in GLB coordinates (y up)
 const interSectionRay = new Ray(new Vector3(0, 0, 0), new Vector3(0, -1, 0))
 const wheelWorldPosition = new Vector3()
-const closestWheelWorldPosition = new Vector3()
 
 const canvas = document.getElementById("webgl")
 const renderer = new WebGLRenderer({ canvas: canvas, antialias: true })
 renderer.setPixelRatio(window.devicePixelRatio)
 renderer.setSize(window.innerWidth, window.innerHeight)
+renderer.shadowMap.enabled = true
+renderer.shadowMap.type = PCFSoftShadowMap
+// the scene and the aircraft are drawn in two passes into the same buffers
+// (see drawScene). The first pass still clears, since a color
+// scene.background forces a clear regardless of autoClear.
+renderer.autoClear = false
 
 const hudCanvas = document.getElementById("hud")
 const hud = new HUDObject(hudCanvas)
@@ -134,13 +141,62 @@ const scene = new Scene()
 scene.background = new Color(0.74, 0.74, 0.82).convertSRGBToLinear()
 scene.fog = new FogExp2(scene.background, 0.000042)
 
+// the aircraft lives in its own scene, which is shifted so that the
+// aircraft sits at the origin while it is being rendered. World coordinates
+// here are UTM meters (north is ~7 000 000), and at that magnitude the
+// GPU's 32-bit floats only resolve positions to ~0.5 m. That is invisible
+// for regular rendering (three.js combines the model and view matrices on
+// the CPU, in double precision) but the shadow lookup works on world
+// positions inside the shader, so the self-shadows would jitter across the
+// airframe. Keeping the aircraft near the origin during rendering avoids
+// that. The terrain is unlit, so the lights only need to be here.
+const aircraftScene = new Scene()
+aircraftScene.fog = scene.fog
+
+// the aircraft is drawn with a copy of the active camera, moved into the
+// shifted aircraft scene's frame
+const aircraftCamera = new PerspectiveCamera()
+
 // add lights to the scene, to propely display the f16 model
 const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
-directionalLight.position.set(0, -0.2, 0.8)
-scene.add(directionalLight)
+aircraftScene.add(directionalLight)
+aircraftScene.add(directionalLight.target)
+
+// only the aircraft casts shadows - onto itself and onto the ground (see
+// GroundShadow) - so the shadow camera is a small box that follows the
+// aircraft around, see drawScene. The box's sides just need to enclose the
+// whole airframe (~15 m long, ~9.5 m wingspan) in any orientation, since
+// the ground shadow is the airframe's own outline seen along the light. Its
+// depth is stretched down to the ground each frame, for the ground shadow.
+const LIGHT_DIRECTION = new Vector3(0, -0.2, 0.8).normalize()
+const SHADOW_LIGHT_DISTANCE = 50
+const SHADOW_EXTENT = 10
+
+// shadow.bias is in shadow camera depth units, which change with the
+// camera's depth range, so the bias is set from this (in meters) each frame
+const SHADOW_DEPTH_BIAS = 0.01
+
+// the ground shadow is only drawn below this height above ground, and
+// the shadow camera reaches this far below the ground height measured under
+// the aircraft, to allow for sloping terrain where the shadow lands
+const MAX_GROUND_SHADOW_HEIGHT = 500
+const GROUND_SHADOW_MARGIN = 100
+const GROUND_SHADOW_OPACITY = 0.5
+
+directionalLight.castShadow = true
+directionalLight.shadow.mapSize.set(2048, 2048)
+directionalLight.shadow.camera.left = -SHADOW_EXTENT
+directionalLight.shadow.camera.right = SHADOW_EXTENT
+directionalLight.shadow.camera.top = SHADOW_EXTENT
+directionalLight.shadow.camera.bottom = -SHADOW_EXTENT
+directionalLight.shadow.camera.near = SHADOW_LIGHT_DISTANCE - SHADOW_EXTENT
+directionalLight.shadow.camera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
+directionalLight.shadow.normalBias = 0.02
 
 const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
-scene.add(ambientLight)
+aircraftScene.add(ambientLight)
+
+const groundShadow = new GroundShadow(aircraftScene, GROUND_SHADOW_OPACITY)
 
 // initialize cameras
 const cameras = []
@@ -173,7 +229,7 @@ const EXTERNAL_CAMERA_MIN_DISTANCE = 10
 // set up container object for the 3D aircraft model
 const f16 = new Object3D()
 f16.visible = false
-scene.add(f16)
+aircraftScene.add(f16)
 
 const hudGeometry = new PlaneGeometry(1, 1)
 const hudMaterial = new MeshBasicMaterial({ color: 0xffff00 })
@@ -266,6 +322,7 @@ window.addEventListener("resize", () => {
   resetViewport()
 })
 window.addEventListener("keydown", keyboardHandler)
+window.addEventListener("keyup", keyUpHandler)
 
 window.addEventListener("gamepadconnected", (event) => {
   console.log("Gamepad %s connected", event.gamepad.id)
@@ -314,6 +371,43 @@ function terrainClearanceBelow(worldPosition) {
   return hit ? hit.distance : null
 }
 
+// stretch the shadow camera down to the ground below the aircraft, and
+// pick the terrain tiles its shadow falls on
+function updateGroundShadow() {
+  const shadowCamera = directionalLight.shadow.camera
+  const tiles = []
+
+  shadowCamera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
+
+  if (heightAboveGround < MAX_GROUND_SHADOW_HEIGHT) {
+    // distance along the light from the aircraft down to the ground
+    const groundDistance = heightAboveGround / LIGHT_DIRECTION.z
+    shadowCamera.far += groundDistance + GROUND_SHADOW_MARGIN
+
+    // the shadow's center on the ground, and the tiles under the corners
+    // of the shadow box around it
+    const centerX = f16.position.x - LIGHT_DIRECTION.x * groundDistance
+    const centerY = f16.position.y - LIGHT_DIRECTION.y * groundDistance
+
+    for (const dx of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
+      for (const dy of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
+        const x = centerX + dx
+        const y = centerY + dy
+        const tileX = Math.round(x - ((x - MINX) % TILE_EXTENTS))
+        const tileY = Math.round(y - ((y - MINY) % TILE_EXTENTS))
+
+        const tile = terrain.tiles.get(`${tileX}-${tileY}`)
+        if (tile?.loaded && !tiles.includes(tile)) tiles.push(tile)
+      }
+    }
+  }
+
+  shadowCamera.updateProjectionMatrix()
+  directionalLight.shadow.bias = -SHADOW_DEPTH_BIAS / (shadowCamera.far - shadowCamera.near)
+
+  groundShadow.update(tiles)
+}
+
 // whether a world position (in the scene's own UTM33-meters coordinates)
 // falls inside a runway polygon for the tile underneath it - see runways.js.
 // tileXOffset/tileYOffset are already the tile-local UTM33 coordinates the
@@ -339,18 +433,28 @@ function isPositionOnRunway(worldPosition) {
 // always where they'd be if extended, whether gear is down or not; that's
 // what lets a gear-up approach still read as "close to the ground" here
 // without it being mistaken for a real touch anywhere this is used.
+//
+// onRunway looks at every wheel that is touching the ground, not just the
+// lowest one - a touchdown with one main wheel on the runway and the other
+// in the grass beside it is not a landing on the runway.
 function evaluateLandingConditions() {
   const wheels = landingGearRig?.wheels
   let closestWheelClearance = Infinity
+  let touchingWheels = 0
+  let touchingWheelsOnRunway = 0
 
   if (wheels) {
     for (const wheel of [wheels.nose, wheels.left, wheels.right]) {
       if (!wheel) continue
 
       const clearance = terrainClearanceBelow(wheel.getWorldPosition(wheelWorldPosition))
-      if (clearance !== null && clearance < closestWheelClearance) {
-        closestWheelClearance = clearance
-        closestWheelWorldPosition.copy(wheelWorldPosition)
+      if (clearance === null) continue
+
+      closestWheelClearance = Math.min(closestWheelClearance, clearance)
+
+      if (clearance < SimulationConstants.GEAR_CONTACT_CLEARANCE) {
+        touchingWheels++
+        if (isPositionOnRunway(wheelWorldPosition)) touchingWheelsOnRunway++
       }
     }
   }
@@ -358,11 +462,11 @@ function evaluateLandingConditions() {
   return {
     hasWheels: !!wheels,
     closestWheelClearance,
-    wheelsNearGround: closestWheelClearance < SimulationConstants.GEAR_CONTACT_CLEARANCE,
+    wheelsNearGround: touchingWheels > 0,
     gearDown,
     sinkRate: airplaneState.sinkRate, // ft/min, positive = descending
     bank: Math.abs(airplaneState.phi * SimulationConstants.RTOD), // deg
-    onRunway: wheels ? isPositionOnRunway(closestWheelWorldPosition) : false,
+    onRunway: touchingWheels > 0 && touchingWheelsOnRunway === touchingWheels,
   }
 }
 
@@ -380,7 +484,7 @@ function landingFailureReasons(status) {
   if (status.bank >= SimulationConstants.MAX_SAFE_BANK) {
     reasons.push(`bank too steep (${status.bank.toFixed(1)} deg, max ${SimulationConstants.MAX_SAFE_BANK})`)
   }
-  if (!status.onRunway) reasons.push("not over a mapped runway")
+  if (!status.onRunway) reasons.push("a wheel is not on a mapped runway")
 
   return reasons
 }
@@ -418,6 +522,13 @@ setInterval(() => {
       document.location.href = "collision.html"
       return
     }
+  } else if (onGround && !status.onRunway) {
+    // Down and rolling, but a wheel has left the runway - off its end or
+    // side, into the grass or the sea. The runway polygons are the only
+    // ground that's mapped as safe to roll on, so this is a crash too.
+    console.log("Crash: ran off the runway")
+    document.location.href = "collision.html"
+    return
   }
 
   // get the coordinates of the tile surrounding the camera
@@ -514,14 +625,19 @@ function drawScene(currentFrametime) {
     gamepad.read(airplaneControlInput)
   }
 
-  airplaneControlInput.normalizeControls(frameTime * 0.001)
+  airplaneControlInput.normalizeControls(frameTime * 0.001, f16simulation.landingGearModel.weightOnWheels)
 
   physicsTimeDebt += frameTime * 0.001
 
   let steps = 0
   while (physicsTimeDebt >= PHYSICS_STEP && steps < MAX_PHYSICS_STEPS) {
     // run physics simulation loop until it is ajour
-    flightControlSystem.update(airplaneControlInput, airplaneState, PHYSICS_STEP)
+    flightControlSystem.update(
+      airplaneControlInput,
+      airplaneState,
+      PHYSICS_STEP,
+      f16simulation.landingGearModel.weightOnWheels,
+    )
     controlActuators.update(flightControlSystem.commands, PHYSICS_STEP)
 
     // step the gust field once per physics step - it belongs to the air, not to
@@ -556,10 +672,18 @@ function drawScene(currentFrametime) {
   // what gives the visual gear a real transition instead of a snap toggle,
   // now that landingGearRig actually animates rather than just hiding/
   // showing parts
-  landingGearRig?.update(controlActuators.gear)
+  const strutTravel = f16simulation.landingGearModel.strutTravel(renderState)
+  for (const leg in strutTravel) strutTravel[leg] *= SimulationConstants.FEET_TO_METERS
+  landingGearRig?.update(controlActuators.gear, controlActuators.noseSteer, strutTravel)
 
   if (hudPlane.visible) {
-    hud.update(renderState, airplaneControlInput, f16simulation.atmosphericModel, compassOffset)
+    hud.update(
+      renderState,
+      airplaneControlInput,
+      f16simulation.atmosphericModel,
+      compassOffset,
+      f16simulation.landingGearModel.weightOnWheels,
+    )
     hud.draw()
     hudTexture.needsUpdate = true
   }
@@ -568,6 +692,11 @@ function drawScene(currentFrametime) {
   cameras[0].position.copy(f16.position)
   cameras[0].quaternion.copy(f16.quaternion)
   cameras[0].rotateX(90 * MathUtils.DEG2RAD)
+
+  // keep the shadow camera centered on the aircraft
+  directionalLight.target.position.copy(f16.position)
+  directionalLight.position.copy(f16.position).addScaledVector(LIGHT_DIRECTION, SHADOW_LIGHT_DISTANCE)
+  updateGroundShadow()
 
   chaseObject.update(f16, frameTime)
 
@@ -592,6 +721,21 @@ function drawScene(currentFrametime) {
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
 
   renderer.render(scene, cameras[currentCamera])
+
+  if (f16.visible) {
+    // render the aircraft relative to its own position (see aircraftScene).
+    // The view from aircraftCamera is identical to the active camera's, so
+    // the depth buffer from the first pass still lines up with it.
+    aircraftScene.position.copy(f16.position).negate()
+    aircraftCamera.copy(cameras[currentCamera], false)
+    aircraftCamera.position.sub(f16.position)
+    renderer.render(aircraftScene, aircraftCamera)
+
+    // put the aircraft back in world coordinates, for everything outside
+    // rendering that reads its world transform (wheel ground contact etc.)
+    aircraftScene.position.set(0, 0, 0)
+    aircraftScene.updateMatrixWorld()
+  }
 }
 
 function getCompassOffset(east, north) {
@@ -699,21 +843,15 @@ const GEAR_MODEL_SCALE = 0.557
 const NOSE_GEAR_NAMES = ["F-16_chassesFront1_LOD0_4", "F-16_chassesFront2_LOD0_5", "F-16_chassesFront3_LOD0_6", "F-16_whel_LOD0_36", "F-16_capFlont_LOD0_1"]
 const NOSE_GEAR_OFFSET = [0, 0, -0.02]
 
-const MAIN_GEAR_NAMES = [
-  "F-16_chassesL1_LOD0_7",
-  "F-16_chassesL2_LOD0_8",
-  "F-16_chassesL3_LOD0_9",
-  "F-16_chassesL4_LOD0_10",
-  "F-16_whelL_LOD0_37",
-  "F-16_capL_LOD0_2",
-  "F-16_chassesR1_LOD0_11",
-  "F-16_chassesR2_LOD0_12",
-  "F-16_chassesR3_LOD0_13",
-  "F-16_chassesR4_LOD0_14",
-  "F-16_whelR_LOD0_38",
-  "F-16_capR_LOD0_3",
-]
-const MAIN_GEAR_OFFSET = [0, 0.9, -0.02]
+// The main gear is placed to match the real F-16's 4.00 m wheelbase and
+// 2.36 m track, which puts the wheels just aft of the CG like on the real
+// aircraft. The legs are moved out sideways to get that track; the doors
+// only move aft, as they are already placed against the belly.
+const MAIN_GEAR_LEFT_LEG_NAMES = ["F-16_chassesL1_LOD0_7", "F-16_chassesL2_LOD0_8", "F-16_chassesL3_LOD0_9", "F-16_chassesL4_LOD0_10", "F-16_whelL_LOD0_37"]
+const MAIN_GEAR_RIGHT_LEG_NAMES = ["F-16_chassesR1_LOD0_11", "F-16_chassesR2_LOD0_12", "F-16_chassesR3_LOD0_13", "F-16_chassesR4_LOD0_14", "F-16_whelR_LOD0_38"]
+const MAIN_GEAR_DOOR_NAMES = ["F-16_capL_LOD0_2", "F-16_capR_LOD0_3"]
+const MAIN_GEAR_OFFSET = [0, -0.04, -0.02]
+const MAIN_GEAR_TRACK_OFFSET = 0.07
 
 function loadAircraftModel(f16) {
   const manager = new LoadingManager()
@@ -732,6 +870,7 @@ function loadAircraftModel(f16) {
           object.rotateX(90 * MathUtils.DEG2RAD)
           object.rotateY(180 * MathUtils.DEG2RAD)
 
+          enableShadows(object)
           f16.add(object)
           controlSurfaceRig = new ControlSurfaceRig(object)
         },
@@ -767,6 +906,7 @@ function loadLandingGear(f16) {
       // the nose and main gear at once (see the comment above their names).
       object.position.set(0, 0, 0)
 
+      enableShadows(object)
       f16.add(object)
 
       // NOSE_GEAR_OFFSET/MAIN_GEAR_OFFSET are meters, in f16's own local
@@ -794,7 +934,9 @@ function loadLandingGear(f16) {
       }
 
       nudge(NOSE_GEAR_NAMES, NOSE_GEAR_OFFSET)
-      nudge(MAIN_GEAR_NAMES, MAIN_GEAR_OFFSET)
+      nudge(MAIN_GEAR_LEFT_LEG_NAMES, [-MAIN_GEAR_TRACK_OFFSET, MAIN_GEAR_OFFSET[1], MAIN_GEAR_OFFSET[2]])
+      nudge(MAIN_GEAR_RIGHT_LEG_NAMES, [MAIN_GEAR_TRACK_OFFSET, MAIN_GEAR_OFFSET[1], MAIN_GEAR_OFFSET[2]])
+      nudge(MAIN_GEAR_DOOR_NAMES, MAIN_GEAR_OFFSET)
 
       landingGearRig = new LandingGearRig(object)
       tintGearToMatchBody(object)
@@ -804,6 +946,18 @@ function loadLandingGear(f16) {
       console.log("Could not load landing gear model: " + error)
     },
   )
+}
+
+// the canopy glass is see-through, so it receives shadows but doesn't cast
+// any - otherwise the whole cockpit would sit in the canopy's shadow
+function enableShadows(object) {
+  object.traverse((child) => {
+    if (child.isMesh) {
+      const materials = Array.isArray(child.material) ? child.material : [child.material]
+      child.castShadow = !materials.some((material) => material.transparent || material.name === "Glass")
+      child.receiveShadow = true
+    }
+  })
 }
 
 // f16-5's own metal/strut material comes in noticeably lighter than the
@@ -878,6 +1032,10 @@ function keyboardHandler(keyboardEvent) {
     case "a":
       airplaneControlInput.targetThrottle -= THROTTLE_STEP
       break
+    case "s": // throttle straight to idle, like pulling the lever back in one go
+      airplaneControlInput.targetThrottle = SimulationConstants.THROTTLE_MIN
+      airplaneControlInput.throttle = SimulationConstants.THROTTLE_MIN
+      break
     case "h": // hud toggle
       hudPlane.visible = !hudPlane.visible
       break
@@ -895,11 +1053,11 @@ function keyboardHandler(keyboardEvent) {
       console.log("Wind and turbulence: %s", weather ? "on" : "off")
       break
     }
-    case "z": // left pedal, yaw left
-      airplaneControlInput.yawPedal -= STICK_STEP
+    case "z": // left pedal, yaw left - and nosewheel steering on the ground
+      movePedal(-1)
       break
     case "x": // right pedal, yaw right
-      airplaneControlInput.yawPedal += STICK_STEP
+      movePedal(1)
       break
     case "j": // external cam left
       externalCameraPosition.compassSpeed -= EXTERNAL_CAMERA_SLEW_STEP
@@ -936,8 +1094,33 @@ function keyboardHandler(keyboardEvent) {
       airplaneControlInput.gear = gearDown ? 1 : 0
       console.log("Landing gear: %s", gearDown ? "down" : "up")
       break
-    case "b": // wheel brakes - spring-centering, hold/tap to keep pressure on
-      airplaneControlInput.brake += BRAKE_STEP
+    case "b": // wheel brakes - full pressure while the key is held, see keyUpHandler
+      airplaneControlInput.brake = 1
+      break
+  }
+}
+
+// On the ground the pedals steer the nosewheel, and a tap there should turn
+// it noticeably - the fine steps that suit rudder in the air would move it
+// only a fraction of a degree at taxi speed. The pedals don't centre by
+// themselves on the ground (see InputVector.normalizeControls), so the
+// ground steps snap to whole steps: tapping the other way always gets back
+// to exactly straight ahead, whatever the pedals were left at in the air.
+const GROUND_PEDAL_STEP = 0.1
+
+function movePedal(direction) {
+  if (f16simulation.landingGearModel.weightOnWheels) {
+    const steps = Math.round(airplaneControlInput.yawPedal / GROUND_PEDAL_STEP) + direction
+    airplaneControlInput.yawPedal = steps * GROUND_PEDAL_STEP
+  } else {
+    airplaneControlInput.yawPedal += direction * STICK_STEP
+  }
+}
+
+function keyUpHandler(keyboardEvent) {
+  switch (keyboardEvent.key) {
+    case "b": // wheel brakes released
+      airplaneControlInput.brake = 0
       break
   }
 }
