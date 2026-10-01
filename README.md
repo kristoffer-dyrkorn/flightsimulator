@@ -62,7 +62,7 @@ September 2026:
 - Added "landing mode" in the flight control system (FCS) when gears are extended
 - Added trailing flaps (flaperons) when in landing mode
 - Added physics model for rolling on the runway, including wheel brakes, turnable nose gear and compressible landing gear struts
-- Added precise surface geometries of all of Norway's runways except Sola / Stavanger. (For Sola the official documentation from Avinor could not be parsed.)
+- Added precise surface geometries of all of Norway's runways
 - Improved ground textures (doubled the resolution and removed various artifacts)
 - Fixed ground texture displacement bug
 

@@ -5,6 +5,8 @@ import { SERVER } from "./tile.js"
 // water, or forest and don't need a request attempt at all.
 const RUNWAY_TILES = new Set([
   "-36250-6859000.json",
+  "-49000-6553000.json",
+  "-49000-6565750.json",
   "-49000-6655000.json",
   "-49000-6667750.json",
   "-61750-6616750.json",

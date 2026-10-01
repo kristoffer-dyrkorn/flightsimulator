@@ -32,13 +32,13 @@ export default class InputVector {
   }
 
   /**
-   * @param dt              seconds since the last call
-   * @param weightOnWheels  true while any wheel is on the ground - the pedals
-   *                        then steer the nosewheel, and stay where they
-   *                        were put rather than centring, so a taxi turn
-   *                        holds until the pilot takes it out again
+   * @param dt          seconds since the last call
+   * @param taxiing     true while taxiing - the pedals then steer the
+   *                    nosewheel, and stay where they were put rather than
+   *                    centring, so a taxi turn holds until the pilot takes
+   *                    it out again
    */
-  normalizeControls(dt, weightOnWheels = false) {
+  normalizeControls(dt, taxiing = false) {
     this.targetThrottle = this.limiter(
       this.targetThrottle,
       SimulationConstants.THROTTLE_MIN,
@@ -69,7 +69,7 @@ export default class InputVector {
 
     this.pitchStick *= centering
     this.rollStick *= centering
-    if (!weightOnWheels) this.yawPedal *= centering
+    if (!taxiing) this.yawPedal *= centering
   }
 
   limiter(value, min, max) {

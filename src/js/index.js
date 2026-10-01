@@ -625,7 +625,7 @@ function drawScene(currentFrametime) {
     gamepad.read(airplaneControlInput)
   }
 
-  airplaneControlInput.normalizeControls(frameTime * 0.001, f16simulation.landingGearModel.weightOnWheels)
+  airplaneControlInput.normalizeControls(frameTime * 0.001, isTaxiing())
 
   physicsTimeDebt += frameTime * 0.001
 
@@ -1098,16 +1098,30 @@ function keyboardHandler(keyboardEvent) {
   }
 }
 
-// On the ground the pedals steer the nosewheel, and a tap there should turn
-// it noticeably - the fine steps that suit rudder in the air would move it
+// Taxiing, the pedals steer the nosewheel, and a tap there should turn it
+// noticeably - the fine steps that suit rudder in the air would move it
 // only a fraction of a degree at taxi speed. The pedals don't centre by
-// themselves on the ground (see InputVector.normalizeControls), so the
-// ground steps snap to whole steps: tapping the other way always gets back
-// to exactly straight ahead, whatever the pedals were left at in the air.
+// themselves while taxiing (see InputVector.normalizeControls), so the taxi
+// steps snap to whole steps: tapping the other way always gets back to
+// exactly straight ahead, whatever the pedals were left at before.
+//
+// Above taxi speed - on a take off or landing roll - the pedals behave as
+// they do in the air: fine steps, centring by themselves. There the rudder
+// is doing the steering, and a pedal that stays wherever a string of
+// corrections left it soon ends up at full rudder, which at take off speeds
+// slews the aircraft off the runway and can roll it over.
 const GROUND_PEDAL_STEP = 0.1
+const TAXI_SPEED_MAX_KT = 30
+
+function isTaxiing() {
+  return (
+    f16simulation.landingGearModel.weightOnWheels &&
+    airplaneState.vt * SimulationConstants.FEET_PER_SECOND_TO_KNOTS < TAXI_SPEED_MAX_KT
+  )
+}
 
 function movePedal(direction) {
-  if (f16simulation.landingGearModel.weightOnWheels) {
+  if (isTaxiing()) {
     const steps = Math.round(airplaneControlInput.yawPedal / GROUND_PEDAL_STEP) + direction
     airplaneControlInput.yawPedal = steps * GROUND_PEDAL_STEP
   } else {
