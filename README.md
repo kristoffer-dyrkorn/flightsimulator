@@ -20,9 +20,28 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 
 ## Controls
 
-Use the keyboard or, if you have, an NXT Gladiator joystick.
+To steer the aircraft up, down, left or right, use the arrow keys. If you have an NXT Gladiator joystick it will also work.
 
-Arrow keys: stick control. This simulator has a flight control system (FCS), so you do not steer the aircraft directly. The FCS decides how the control surfaces should move to make the aircraft do what you want. With the landing gear down and the aircraft in the air, the aircraft trims itself to 13 degrees angle of attack, the approach angle of attack of the real F-16: the speed follows from it, and you set the glide path with the throttle. The stick moves the angle of attack away from 13 degrees while it is held. `z` and `x`: rudder pedals (nose gear control when on the ground). `q` and `a`: throttle. `s` sets the throttle to idle. Space bar cycles camera views: cockpit / wingman camera / external camera. For the external camera, `j` and `l` rotates the camera left and right, `i` and `k` rotates it up and down. Use `,` and `.` to move the camera nearer/further away. Use `h` to toggle HUD on and off. `1` and `2`: decrease/increase air brakes. `g` extends/retracts landing gears. Hold `b` to apply the wheel brakes when rolling on a runway.
+The aircraft has a flight control system (FCS), so you do not steer it directly. The FCS decides how the control surfaces move in order to make the aircraft do what you want.
+
+- `q` and `a`: throttle (afterburner kicks in at >80% throttle)
+- `s` set throttle to idle
+- `1` and `2`: decrease/increase air brakes
+- `g` extend/retract landing gears and also enable/disable landing mode
+- `z` and `x`: rudder (nose gear control when on a runway)
+- `b` wheel brakes when on a runway
+- `h`: toggle HUD on and off
+- space bar: cycle camera views (cockpit camera / follower camera / external camera)
+- `j` and `l`: rotate the external camera left and right
+- `i` and `k`: rotate the external camera up and down.
+- `,` and `.`: move the external camera nearer/further away
+
+## Landing the aircraft
+
+You can land the aircraft on any of Norway's runways. For a successful landing you must land inside the runway perimeter, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees.
+
+The FCS has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of 13 degrees, normal for an F16 on approach. In this mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
+With the gears down, a throttle setting of around 20% and full air brakes will give you a speed of around 140 knots and a suitable glide path of 3 degrees. You will need to flare before touchdown. At touchdown, set the throttle to idle and apply wheel brakes.
 
 ## Screenshots
 
@@ -37,29 +56,33 @@ Arrow keys: stick control. This simulator has a flight control system (FCS), so 
 September 2026:
 
 - Added von Kármán wind turbulence model
-- Added landing gears and updated the aerodynamic model so gear drag is correctly modelled
-- Added support for landing on all of Norway's runways except Sola / Stavanger. Sola could not be included since the PDF containing the official Avinor runway documentation could not be parsed - and thus the runway geometries and coordinates there could not be extracted.
+- Added support for landing the aircraft on all of Norway's runways
+- Added landing gear geometries to the 3D model and updated the aerodynamic model to incorporate gear drag
+- Added bay door animations when extracting and retracting landing gear (animation of the landing gear itself is not yet in place)
+- Added "landing mode" in the flight control system (FCS) when gears are extended
+- Added trailing flaps (flaperons) when in landing mode
+- Added physics model for rolling on the runway, including wheel brakes, turnable nose gear and compressible landing gear struts
+- Added precise surface geometries of all of Norway's runways except Sola / Stavanger. (For Sola the official documentation from Avinor could not be parsed.)
+- Improved ground textures (doubled the resolution and removed various artifacts)
 - Fixed ground texture displacement bug
-- Added high resolution runway geometries with correct elevations, based on Avinor documentation
-- Added landing mode when gear is extended, with flaperons and AoA-based controls
 
 August 2026:
 
 - Use quaternions instead of Euler angles in the physics model, avoids gimbal lock and improves numerical robustness
 - Now calculates the compass direction correctly
 - Decoupled the physics loop from the rendering loop to avoid large time steps and numerical instabilities
-- Fixed leading edge flap calculations
-- Fixed wrong data in air brake aerodynamic table and enabled air brakes
-- Fixed bug in flight path indicator placement
+- Fixed leading edge flap aerodynamic calculations
+- Fixed wrong data in the air brake aerodynamics table and enabled air brakes
+- Fixed a bug in the flight path indicator placement
 - Fixed limitations in the atmospheric model for high altitudes
 - Fixed jitter when using the chase camera
-- Added actuator lag and an FCS for fly-by-wire control. The data flow is now: stick input -> FCS model (optimizer/limiter) -> actuator signal -> new rudder positions -> physics model
+- Added actuator lag and a flight control system (FCS) for fly-by-wire control. The data flow is now: stick input -> FCS logic (flight dynamics optimizer/limiter) -> actuator signal -> rudder movement -> physics model update
 - Added air compressibility model (transonic drag)
 - Switched from Euler integration to RK4 integration in the physics model, improving accuracy
 
 July 2025:
 
-- Upgraded three.js. Switched data formats, now using GLB for meshes and KTX2 for textures.
+- Upgraded `three.js`. Switched data formats, now using GLB for meshes and KTX2 for textures.
 - Tests for ground collisions
 
 June 2025:
@@ -68,9 +91,9 @@ June 2025:
 
 May 2025:
 
-- Implemented a simple HUD!
+- Implemented a simple HUD
 - Significantly better colors and detail in the imagery - based on orthophotos of Norway and color-corrected Sentinel-2 images from 2022.
-- Spatial audio
+- Added spatial audio
 
 July 2021:
 
@@ -81,7 +104,7 @@ July 2021:
 April 2021:
 
 - Updated satellite photos, taken summer/fall 2019, giving better image quality and more realistic colors.
-- New external cameras: Press `space bar` to cycle between internal camera (cockpit), "wingman camera" and external camera.
+- New external cameras: Press `space bar` to cycle between internal camera (cockpit), "follower camera" and external camera.
 - Geometry and textures have been omtimized. Mesh simplification reduces vertex counts, and compressed texture format reduces upload times and GPU memory.
 - Start coordinates can be given both as UTM 33N and lat/lon values. A starting direction can also be given. See below for examples.
 - Code has been rewritten to use `three.js`.

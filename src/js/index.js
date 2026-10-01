@@ -59,11 +59,6 @@ let previousFrameTime = 0
 const PHYSICS_STEP = 1 / 60 // seconds
 const MAX_PHYSICS_STEPS = 15
 
-// Heights to read the forecast at, m above sea level - the surface and then
-// roughly 5000, 10000 and 20000 ft. One request each, which is enough to see the
-// shape of the wind with height without leaning on a free service.
-const WIND_PROFILE_ALTITUDES = [0, 1500, 3000, 6000]
-
 // At the surface the forecast is the wind 10 m up. The turbulence model wants
 // the wind at 20 ft, and the two differ by the shape of the boundary layer: the
 // logarithmic profile, over terrain of middling roughness. It works out at about
@@ -271,16 +266,19 @@ airplaneState.init(startPoint, startDirection)
 // height from the first step onwards, and it scales its eddies by it.
 heightAboveGround = startPoint[2]
 
-// Fly in the real weather: ask MET what the wind is doing over the start point
-// at each of a few heights, and hand the profile to the turbulence model - the
-// surface wind for the roughness down low, and how the wind changes with height
-// for the turbulence aloft. Deliberately not awaited: the simulation starts on
-// the default weather and picks the real one up a moment later, and carries on
-// with the default if the service cannot be reached.
-Promise.all(WIND_PROFILE_ALTITUDES.map((altitude) => downloadWindData(startPoint[4], altitude))).then((levels) => {
-  const profile = levels.filter(Boolean).sort((a, b) => a.altitude - b.altitude)
+// Fly in the real weather: ask MET what the wind is doing over the start point,
+// and hand it to the turbulence model - the surface wind sets the roughness down
+// low - and to the steady wind the aircraft is carried along by. The nowcast
+// only has the wind near the ground: its altitude parameter is the height of
+// the location, used to correct the temperature, and the wind comes back the
+// same whatever it is set to. So one request, and the wind is the same at all
+// heights. Deliberately not awaited: the simulation starts on the default
+// weather and picks the real one up a moment later, and carries on with the
+// default if the service cannot be reached.
+downloadWindData(startPoint[4]).then((surface) => {
+  if (!surface) return
 
-  if (profile.length === 0) return
+  const profile = [surface]
 
   // the lowest level is the surface wind, and the surface wind is the one the
   // boundary layer profile applies to
@@ -361,7 +359,9 @@ function terrainClearanceBelow(worldPosition) {
   const y = Math.round(worldPosition.y - tileYOffset)
 
   const tile = terrain.tiles.get(`${x}-${y}`)
-  if (!tile || !tile.loaded) return null
+  // the tile's BVH is built after it loads, so it can be shown before it
+  // can be ray cast against
+  if (!tile || !tile.loaded || !tile.tileMesh.geometry.boundsTree) return null
 
   // set ray origin to the query position, in the tile's own local
   // coordinates, and convert from z up to the GLB's y up
@@ -540,7 +540,7 @@ setInterval(() => {
 
   // get the tile
   const tile = terrain.tiles.get(`${x}-${y}`)
-  if (tile.loaded) {
+  if (tile?.loaded && tile.tileMesh.geometry.boundsTree) {
     const tileGeometry = tile.tileMesh.geometry
 
     // set ray origin to the camera position
@@ -747,11 +747,11 @@ function getCompassOffset(east, north) {
   return Math.atan(Math.tan(lonDelta * MathUtils.DEG2RAD) * Math.sin(lonlat[1] * MathUtils.DEG2RAD)) * MathUtils.RAD2DEG
 }
 
-async function downloadWindData(lonlat, alt) {
+async function downloadWindData(lonlat) {
   // https://api.met.no/doc/
 
   const weatherAPI = "https://api.met.no/weatherapi/nowcast/2.0/complete"
-  const weatherURL = `${weatherAPI}?lat=${lonlat[1].toFixed(3)}&lon=${lonlat[0].toFixed(3)}&altitude=${alt}`
+  const weatherURL = `${weatherAPI}?lat=${lonlat[1].toFixed(3)}&lon=${lonlat[0].toFixed(3)}`
 
   try {
     const weatherResponse = await fetch(`${weatherURL}`, {
@@ -772,8 +772,6 @@ async function downloadWindData(lonlat, alt) {
     const { wind_from_direction, wind_speed, wind_speed_of_gust } =
       weatherData.properties.timeseries[0].data.instant.details
 
-    // the altitude asked for comes back as the third coordinate of the point
-    const altitude = weatherData.geometry.coordinates[2] ?? alt
 
     // speeds are reported in m/s and the flight model works in ft/s
     const speed = wind_speed * SimulationConstants.METERS_TO_FEET
@@ -784,7 +782,7 @@ async function downloadWindData(lonlat, alt) {
     const heading = (wind_from_direction + 180) * MathUtils.DEG2RAD
 
     return {
-      altitude: altitude * SimulationConstants.METERS_TO_FEET,
+      altitude: 0, // the surface wind
       east: speed * Math.sin(heading),
       north: speed * Math.cos(heading),
       speed,

@@ -99,9 +99,22 @@ export default class Tile {
 
         console.log(`${this.tileName}.glb loaded, ${this.tileMesh.geometry.index.array.length / 3} triangles`)
 
-        Tile.bvhWorker.generate(this.tileMesh.geometry).then((bvh) => {
-          this.tileMesh.geometry.boundsTree = bvh
-        })
+        // The worker builds one BVH at a time and throws if asked for a
+        // second while it is busy - which happens whenever several tiles
+        // load at once, as they do at startup. So the jobs are queued, each
+        // one starting when the one before it has finished (or failed).
+        // The BVH goes onto the geometry it was built for, which is no
+        // longer this tile's own if the tile has been unloaded and reloaded
+        // in the meantime.
+        const geometry = this.tileMesh.geometry
+        Tile.bvhQueue = Tile.bvhQueue
+          .then(() => Tile.bvhWorker.generate(geometry))
+          .then((bvh) => {
+            geometry.boundsTree = bvh
+          })
+          .catch((error) => {
+            console.log(`BVH error for ${this.tileName}:`, error)
+          })
 
         Tile.ktx2Loader.load(
           `${SERVER}/texture-hires/${this.tileName}.ktx2`,
@@ -135,6 +148,9 @@ export default class Tile {
 }
 
 Tile.loadCount = 0
+
+// the BVH jobs waiting for the worker, see load()
+Tile.bvhQueue = Promise.resolve()
 
 Tile.ktx2Loader = new KTX2Loader()
 Tile.ktx2Loader.setTranscoderPath("js/externals/basis/")
