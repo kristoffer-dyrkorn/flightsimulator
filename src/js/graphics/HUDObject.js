@@ -23,6 +23,10 @@ export default class HUDObject {
     this.ctx.fillStyle = "#20ff40"
     this.ctx.strokeStyle = "#20ff40"
 
+    // see setFieldOfView - until it is called, the angle the HUD has always
+    // covered
+    this.setFieldOfView(2 * Math.atan(0.5 / 2.2))
+
     // raw sink rate is a per-step derivative and jitters between frames -
     // smoothed for display by averaging over a trailing 1 second window,
     // { time, value } samples, oldest first
@@ -141,6 +145,25 @@ export default class HUDObject {
     this.ctx.stroke()
   }
 
+  /**
+   * The angle, seen from the pilot's eyes, that the canvas covers across its
+   * width (and height - it is square) once it is drawn on the HUD panel.
+   * The pitch ladder and the flight path marker are placed from it, so they
+   * line up with the world outside.
+   *
+   * @param fieldOfView  radians
+   */
+  setFieldOfView(fieldOfView) {
+    this.pixelsPerTangent = this.height / 2 / Math.tan(fieldOfView / 2)
+  }
+
+  // How far from the centre of the HUD, in pixels, something an angle away
+  // from straight ahead is drawn. The HUD is a flat panel, so that goes with
+  // the tangent of the angle, not with the angle itself.
+  angleToPixels(degrees) {
+    return this.pixelsPerTangent * Math.tan(degrees * MathUtils.DEG2RAD)
+  }
+
   drawPitchLadder() {
     this.ctx.translate(this.width / 2, this.height / 2)
     this.ctx.rotate(-this.roll)
@@ -151,18 +174,18 @@ export default class HUDObject {
 
     // draw normal lines above horizon
     for (let deg = 0; deg <= 90; deg += 5) {
-      const offset = -(-pitch + deg) * 28
+      const offset = -this.angleToPixels(deg - pitch)
 
       // only draw pitch lines if they are within +-8 deg of current pitch
       // ie within borders of the HUD
       if (Math.abs(pitch - deg) < 8) {
         if (deg === 0) {
           // horizon lines are extra wide
-          this.ctx.moveTo(-250, offset)
+          this.ctx.moveTo(-350, offset)
           this.ctx.lineTo(-50, offset)
 
           this.ctx.moveTo(50, offset)
-          this.ctx.lineTo(250, offset)
+          this.ctx.lineTo(350, offset)
         } else {
           this.ctx.moveTo(-150, offset)
           this.ctx.lineTo(-50, offset)
@@ -186,7 +209,7 @@ export default class HUDObject {
     this.ctx.setLineDash([17, 7])
 
     for (let deg = -90; deg < 0; deg += 5) {
-      const offset = -(-pitch + deg) * 28
+      const offset = -this.angleToPixels(deg - pitch)
 
       // only draw pitch lines if they are within +-8 deg of current pitch
       // ie within borders of the HUD
@@ -211,7 +234,7 @@ export default class HUDObject {
   }
 
   drawFlightPathMarker() {
-    const offset = MathUtils.RAD2DEG * this.flightPathAngle * 28
+    const offset = this.angleToPixels(MathUtils.RAD2DEG * this.flightPathAngle)
 
     this.ctx.beginPath()
     this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)

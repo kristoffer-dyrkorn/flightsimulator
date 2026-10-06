@@ -33,6 +33,11 @@ export default class GroundShadow {
   }
 
   // tiles: the loaded tiles the shadow may fall on (empty to hide the shadow)
+  // hides the shadow until the next update() - see drawScene in index.js
+  hide() {
+    for (const mesh of this.meshes) mesh.visible = false
+  }
+
   update(tiles) {
     for (let i = 0; i < MAX_TILES; i++) {
       const mesh = this.meshes[i]

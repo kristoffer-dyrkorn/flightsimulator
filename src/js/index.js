@@ -6,17 +6,19 @@ import {
   Color,
   FogExp2,
   DirectionalLight,
-  AmbientLight,
+  HemisphereLight,
   PerspectiveCamera,
   Object3D,
   PlaneGeometry,
   MeshBasicMaterial,
+  MeshPhongMaterial,
   CanvasTexture,
   Mesh,
   MathUtils,
   Ray,
   Vector3,
   Quaternion,
+  Triangle,
   LoadingManager,
   PCFSoftShadowMap,
 } from "three"
@@ -31,6 +33,7 @@ import RungeKutta4 from "./hifimodel/integrator.js"
 import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
+import { splitOffTriangles } from "./graphics/splitMesh.js"
 import GroundShadow from "./graphics/GroundShadow.js"
 import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
 import LandingGearRig from "./graphics/landingGearRig.js"
@@ -116,6 +119,7 @@ let paused = false
 // ray for intersection testing with ground, direction is in GLB coordinates (y up)
 const interSectionRay = new Ray(new Vector3(0, 0, 0), new Vector3(0, -1, 0))
 const wheelWorldPosition = new Vector3()
+const aircraftPosition = new Vector3()
 
 const canvas = document.getElementById("webgl")
 const renderer = new WebGLRenderer({ canvas: canvas, antialias: true })
@@ -152,8 +156,19 @@ aircraftScene.fog = scene.fog
 // shifted aircraft scene's frame
 const aircraftCamera = new PerspectiveCamera()
 
-// add lights to the scene, to propely display the f16 model
-const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
+// Daylight for the f16 model: the sun, and the light from the sky above and
+// the ground below. A sunlit surface is several times brighter than one
+// facing the ground, which only gets the light the ground reflects - so
+// rather than an ambient light, which lights the underside as brightly as
+// the top, a hemisphere light: sky blue from above, a grey-brown ground
+// bounce from below.
+const SUN_COLOUR = 0xfff5ec
+const SUN_INTENSITY = 1.3
+const SKY_COLOUR = 0xc7d4ed
+const GROUND_BOUNCE_COLOUR = 0x958d80
+const SKY_INTENSITY = 0.9
+
+const directionalLight = new DirectionalLight(SUN_COLOUR, SUN_INTENSITY)
 aircraftScene.add(directionalLight)
 aircraftScene.add(directionalLight.target)
 
@@ -170,6 +185,17 @@ const SHADOW_EXTENT = 10
 // shadow.bias is in shadow camera depth units, which change with the
 // camera's depth range, so the bias is set from this (in meters) each frame
 const SHADOW_DEPTH_BIAS = 0.01
+const SHADOW_NORMAL_BIAS = 0.02 // meters
+
+// Larger biases for the airframe drawn close up from the cockpit. There the
+// nearest surfaces - the canopy frame, the cockpit walls, the fuselage just
+// behind the canopy - are a meter or less from the eye, so one shadow map
+// texel (about a centimeter) covers dozens of pixels, and many of them are
+// lit at a grazing angle. With the biases tuned for normal viewing distances
+// they show shadow acne that shifts with every small change in attitude, and
+// flickers. Only used for that close-up pass (see drawScene).
+const COCKPIT_SHADOW_DEPTH_BIAS = 0.03
+const COCKPIT_SHADOW_NORMAL_BIAS = 0.1
 
 // the ground shadow is only drawn below this height above ground, and
 // the shadow camera reaches this far below the ground height measured under
@@ -186,10 +212,15 @@ directionalLight.shadow.camera.top = SHADOW_EXTENT
 directionalLight.shadow.camera.bottom = -SHADOW_EXTENT
 directionalLight.shadow.camera.near = SHADOW_LIGHT_DISTANCE - SHADOW_EXTENT
 directionalLight.shadow.camera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
-directionalLight.shadow.normalBias = 0.02
+directionalLight.shadow.normalBias = SHADOW_NORMAL_BIAS
 
-const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
-aircraftScene.add(ambientLight)
+// A hemisphere light takes its "up" from its position, seen from the scene's
+// origin - which, with the aircraft scene shifted to the aircraft while it is
+// drawn (see aircraftScene), means placing it straight above the aircraft
+// each frame, like the sun (see drawScene).
+const hemisphereLight = new HemisphereLight(SKY_COLOUR, GROUND_BOUNCE_COLOUR, SKY_INTENSITY)
+const UP = new Vector3(0, 0, 1)
+aircraftScene.add(hemisphereLight)
 
 const groundShadow = new GroundShadow(aircraftScene, GROUND_SHADOW_OPACITY)
 
@@ -219,12 +250,57 @@ const externalCameraPosition = {
 }
 
 const EXTERNAL_CAMERA_SLEW_STEP = 4.8
+
+// The pilot's eye point, meters, in the aircraft model's own frame (x right,
+// y forward, z up, from the centre of gravity) - measured from f16.obj: the
+// top of the pilot figure's head is 0.99 m up, between 5.04 and 5.95 m
+// forward, and the HUD glass in front of it reaches 0.84 m up. The cockpit
+// camera sits here, looking along the aircraft's nose axis.
+const EYE_POSITION = new Vector3(0, 5.25, 0.85)
+
+// Where the pilot is looking, from the cockpit: degrees of yaw from straight
+// ahead, positive to the left. The look keys set the target, and the view
+// glides there (see updateCockpitLook) - set by the j, l, i and k keys
+// while the cockpit camera is selected (see lookFromCockpit), separate from
+// the external camera's state, which the same keys drive in the other views.
+// Neither is kept within +-180: turning keeps going round.
+const cockpitLook = { yaw: 0, targetYaw: 0 }
+const LOOK_STEP = 20 // degrees per press of j or l
+const LOOK_BACK = 180
+const LOOK_GLIDE_TIME = 0.1 // seconds, time constant of the glide
+const LOOK_GLIDE_RATE_MAX = 360 // degrees per second
+
+// an angle, degrees, wrapped into -180..180
+const wrapDegrees = (angle) => angle - 360 * Math.round(angle / 360)
 const EXTERNAL_CAMERA_MIN_DISTANCE = 10
 
-// set up container object for the 3D aircraft model
+// From the cockpit, the canopy frame and HUD glass are well inside the
+// active camera's near plane, so the airframe is drawn a second time with a
+// camera that clips much closer - see drawScene.
+const COCKPIT_NEAR = 0.05
+const COCKPIT_FAR = 100
+
+// set up container object for the 3D aircraft model. Visible from the start,
+// since the simulator starts in the cockpit and the airframe shows from there.
 const f16 = new Object3D()
-f16.visible = false
 aircraftScene.add(f16)
+
+// parts of the model hidden in the cockpit view: the pilot figure (the
+// camera is inside its head), the model's HUD glass and the panels either
+// side of it (the simulator draws its own HUD there), and the ejection seat
+// (the camera sits between its side walls and in front of its headrest, so
+// looking sideways or back they would fill much of the view)
+const COCKPIT_HIDDEN_PARTS = ["Pilot", "Glass_HUD", "HUD_SidePanels", "Eject_Seat"]
+let cockpitHiddenParts = []
+
+// Parts of the model that don't receive the aircraft's own shadows in the
+// cockpit view: the cockpit interior and the fuselage around the canopy
+// (see separateCockpitSurroundings). They are so close to the eye there that
+// one shadow map texel covers dozens of pixels, and the self-shadows on them
+// flicker with every small change in attitude however the shadow biases are
+// set. They still cast shadows, and the exterior views are unchanged.
+const COCKPIT_UNSHADOWED_PARTS = ["Cockpit_Interior", "Canopy_Inside", "Cockpit_Surroundings"]
+let cockpitUnshadowedParts = []
 
 const hudGeometry = new PlaneGeometry(1, 1)
 const hudMaterial = new MeshBasicMaterial({ color: 0xffff00 })
@@ -232,9 +308,32 @@ const hudTexture = new CanvasTexture(hudCanvas)
 hudMaterial.map = hudTexture
 hudMaterial.transparent = true
 
+// The HUD is drawn last, in a scene of its own, so the airframe seen from
+// the cockpit never covers it. The HUD plane is fixed in that scene, straight
+// ahead along the aircraft's nose, and the HUD camera borrows the cockpit
+// camera's projection and turns with the pilot's look - so when the pilot
+// looks sideways, the HUD stays over the nose and slides out of view, as the
+// real one does, its symbology still lined up with the world outside.
+const hudScene = new Scene()
+const hudCamera = new PerspectiveCamera()
+const HUD_LOOK_AXIS = new Vector3(0, 1, 0) // up, in the HUD camera's frame
+
+// The HUD sits where the model's HUD combiner glass is, straight ahead of the
+// pilot's eyes (see EYE_POSITION - the glass is 0.57 to 0.68 m in front of
+// them). It covers the same angle as it always has: 1 m wide at 2.2 m, about
+// 25.6 degrees - a flat panel seen from a camera at the eye looks exactly the
+// same at any distance, as long as that angle stays the same.
+const HUD_DISTANCE = 0.625 // m
+const HUD_FIELD_OF_VIEW = 2 * Math.atan(0.5 / 2.2) // radians, across the panel
+const HUD_SIZE = 2 * HUD_DISTANCE * Math.tan(HUD_FIELD_OF_VIEW / 2) // m
+
+// the HUD draws its symbology to match the angle the panel covers
+hud.setFieldOfView(HUD_FIELD_OF_VIEW)
+
 const hudPlane = new Mesh(hudGeometry, hudMaterial)
-hudPlane.position.set(0, 0, -2)
-camera.add(hudPlane)
+hudPlane.position.set(0, 0, -HUD_DISTANCE)
+hudPlane.scale.set(HUD_SIZE, HUD_SIZE, 1)
+hudScene.add(hudPlane)
 
 // load the actual aircraft model into the scene
 loadAircraftModel(f16)
@@ -479,7 +578,9 @@ function landingFailureReasons(status) {
 
   if (!status.gearDown) reasons.push("landing gear is up")
   if (status.sinkRate >= SimulationConstants.MAX_SAFE_SINK_RATE) {
-    reasons.push(`sink rate too high (${status.sinkRate.toFixed(1)} ft/min, max ${SimulationConstants.MAX_SAFE_SINK_RATE})`)
+    reasons.push(
+      `sink rate too high (${status.sinkRate.toFixed(1)} ft/min, max ${SimulationConstants.MAX_SAFE_SINK_RATE})`,
+    )
   }
   if (status.bank >= SimulationConstants.MAX_SAFE_BANK) {
     reasons.push(`bank too steep (${status.bank.toFixed(1)} deg, max ${SimulationConstants.MAX_SAFE_BANK})`)
@@ -531,24 +632,33 @@ setInterval(() => {
     return
   }
 
-  // get the coordinates of the tile surrounding the camera
-  const tileXOffset = (camera.position.x - MINX) % TILE_EXTENTS
-  const x = Math.round(camera.position.x - tileXOffset)
+  // the aircraft's own position (its centre of gravity), meters - not the
+  // cockpit camera's, which sits at the pilot's eyes, several meters ahead
+  // of and above it
+  aircraftPosition.set(
+    airplaneState.epos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.npos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.alt * SimulationConstants.FEET_TO_METERS,
+  )
 
-  const tileYOffset = (camera.position.y - MINY) % TILE_EXTENTS
-  const y = Math.round(camera.position.y - tileYOffset)
+  // get the coordinates of the tile surrounding the aircraft
+  const tileXOffset = (aircraftPosition.x - MINX) % TILE_EXTENTS
+  const x = Math.round(aircraftPosition.x - tileXOffset)
+
+  const tileYOffset = (aircraftPosition.y - MINY) % TILE_EXTENTS
+  const y = Math.round(aircraftPosition.y - tileYOffset)
 
   // get the tile
   const tile = terrain.tiles.get(`${x}-${y}`)
   if (tile?.loaded && tile.tileMesh.geometry.boundsTree) {
     const tileGeometry = tile.tileMesh.geometry
 
-    // set ray origin to the camera position
+    // set ray origin to the aircraft position
     // use relative coordinates inside the tile to match the geometry's coordinates
     // and convert from z up to y up
-    interSectionRay.origin.set(tileXOffset, camera.position.z, -tileYOffset)
+    interSectionRay.origin.set(tileXOffset, aircraftPosition.z, -tileYOffset)
 
-    // cast a ray from the camera position and straight down towards the terrain
+    // cast a ray from the aircraft position and straight down towards the terrain
     const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
 
     // Ground height tracking runs unconditionally, on- or off-ground alike:
@@ -567,24 +677,27 @@ setInterval(() => {
       // physics step, since the ground's elevation doesn't move with the
       // aircraft and this 200ms-updated reading is the only terrain height
       // available anyway
-      f16simulation.landingGearModel.groundAlt = (camera.position.z - hit.distance) * SimulationConstants.METERS_TO_FEET
+      f16simulation.landingGearModel.groundAlt =
+        (aircraftPosition.z - hit.distance) * SimulationConstants.METERS_TO_FEET
     }
 
     // No ground found at all directly below the aircraft - off the edge of
     // loaded terrain, or already under the mesh - is always a crash,
     // whatever state the landing gear is in.
     if (!hit) {
-      console.log("Crash: no terrain found directly below the aircraft (off the edge of loaded terrain, or already under the surface)")
+      console.log(
+        "Crash: no terrain found directly below the aircraft (off the edge of loaded terrain, or already under the surface)",
+      )
       document.location.href = "collision.html"
       return
     }
 
-    // The distance-from-camera "too low" check below is a coarse backstop
+    // The distance-from-aircraft "too low" check below is a coarse backstop
     // for when there's no wheel telemetry yet (landingGearRig hasn't
     // loaded) - once there is, the wheel-based check above already covers
     // this, more precisely (GEAR_CONTACT_CLEARANCE, not an arbitrary 4 m)
     // and more completely (three sample points under nose and both main
-    // gear, not one under the camera). Left as-is here, this threshold is
+    // gear, not one under the aircraft). Left as-is here, this threshold is
     // measured from the CG, which sits a good 1.7-1.8 m above the wheels
     // (see landinggearmodel.js's LEGS) - it would fire on every ordinary
     // approach, well before the wheels themselves ever got close enough to
@@ -688,14 +801,18 @@ function drawScene(currentFrametime) {
     hudTexture.needsUpdate = true
   }
 
-  // always update master camera
-  cameras[0].position.copy(f16.position)
+  // always update master camera - at the pilot's eyes, not at the aircraft's
+  // own reference point (its centre of gravity)
+  cameras[0].position.copy(EYE_POSITION).applyQuaternion(f16.quaternion).add(f16.position)
   cameras[0].quaternion.copy(f16.quaternion)
   cameras[0].rotateX(90 * MathUtils.DEG2RAD)
+  updateCockpitLook(frameTime * 0.001)
+  cameras[0].rotateY(cockpitLook.yaw * MathUtils.DEG2RAD)
 
   // keep the shadow camera centered on the aircraft
   directionalLight.target.position.copy(f16.position)
   directionalLight.position.copy(f16.position).addScaledVector(LIGHT_DIRECTION, SHADOW_LIGHT_DISTANCE)
+  hemisphereLight.position.copy(f16.position).add(UP)
   updateGroundShadow()
 
   chaseObject.update(f16, frameTime)
@@ -722,19 +839,68 @@ function drawScene(currentFrametime) {
 
   renderer.render(scene, cameras[currentCamera])
 
-  if (f16.visible) {
-    // render the aircraft relative to its own position (see aircraftScene).
-    // The view from aircraftCamera is identical to the active camera's, so
-    // the depth buffer from the first pass still lines up with it.
-    aircraftScene.position.copy(f16.position).negate()
-    aircraftCamera.copy(cameras[currentCamera], false)
-    aircraftCamera.position.sub(f16.position)
+  // render the aircraft relative to its own position (see aircraftScene).
+  // The view from aircraftCamera is identical to the active camera's, so
+  // the depth buffer from the first pass still lines up with it.
+  aircraftScene.position.copy(f16.position).negate()
+  aircraftCamera.copy(cameras[currentCamera], false)
+  aircraftCamera.position.sub(f16.position)
+
+  const inCockpit = currentCamera === 0
+  for (const part of cockpitHiddenParts) part.visible = !inCockpit
+  for (const part of cockpitUnshadowedParts) part.receiveShadow = !inCockpit
+  paintCockpitInterior(inCockpit)
+
+  renderer.render(aircraftScene, aircraftCamera)
+
+  // From the cockpit, much of the airframe in view - the canopy frame, the
+  // HUD glass - is closer than the near plane the pass above shares with
+  // the terrain, and was clipped away. So it is drawn again on top, with
+  // a camera that clips much closer. Its depth range doesn't match the
+  // terrain's, so the depth buffer is cleared first - which is fine, as
+  // nothing outside can be in front of the airframe seen from inside it.
+  // The ground shadow is left out of this pass: it needs the terrain's
+  // depth, and was already drawn in the pass above. The shadow map from
+  // that pass is reused, so the self-shadowing stays the same.
+  if (inCockpit) {
+    renderer.clearDepth()
+
+    aircraftCamera.near = COCKPIT_NEAR
+    aircraftCamera.far = COCKPIT_FAR
+    aircraftCamera.updateProjectionMatrix()
+
+    groundShadow.hide()
+    renderer.shadowMap.autoUpdate = false
+
+    // larger shadow biases close up - see COCKPIT_SHADOW_NORMAL_BIAS
+    const shadow = directionalLight.shadow
+    const bias = shadow.bias
+    shadow.bias = -COCKPIT_SHADOW_DEPTH_BIAS / (shadow.camera.far - shadow.camera.near)
+    shadow.normalBias = COCKPIT_SHADOW_NORMAL_BIAS
+
     renderer.render(aircraftScene, aircraftCamera)
 
-    // put the aircraft back in world coordinates, for everything outside
-    // rendering that reads its world transform (wheel ground contact etc.)
-    aircraftScene.position.set(0, 0, 0)
-    aircraftScene.updateMatrixWorld()
+    shadow.bias = bias
+    shadow.normalBias = SHADOW_NORMAL_BIAS
+    renderer.shadowMap.autoUpdate = true
+  }
+
+  // put the aircraft back in world coordinates, for everything outside
+  // rendering that reads its world transform (wheel ground contact etc.)
+  aircraftScene.position.set(0, 0, 0)
+  aircraftScene.updateMatrixWorld()
+
+  if (hudPlane.visible) {
+    renderer.clearDepth()
+    // the cockpit camera's view, but clipping closer than its 1 m near plane,
+    // which the HUD panel is well inside
+    hudCamera.fov = cameras[0].fov
+    hudCamera.aspect = cameras[0].aspect
+    hudCamera.near = COCKPIT_NEAR
+    hudCamera.far = COCKPIT_FAR
+    hudCamera.updateProjectionMatrix()
+    hudCamera.quaternion.setFromAxisAngle(HUD_LOOK_AXIS, cockpitLook.yaw * MathUtils.DEG2RAD)
+    renderer.render(hudScene, hudCamera)
   }
 }
 
@@ -771,7 +937,6 @@ async function downloadWindData(lonlat) {
     // the precipitation forecast, and have nothing else in them
     const { wind_from_direction, wind_speed, wind_speed_of_gust } =
       weatherData.properties.timeseries[0].data.instant.details
-
 
     // speeds are reported in m/s and the flight model works in ft/s
     const speed = wind_speed * SimulationConstants.METERS_TO_FEET
@@ -838,15 +1003,33 @@ const GEAR_MODEL_SCALE = 0.557
 // (added to that part's own existing position, in the GLB's local space)
 // instead of one offset for the whole model. Both are tuned by eye against
 // the OBJ's fuselage and need iterating further if they look off.
-const NOSE_GEAR_NAMES = ["F-16_chassesFront1_LOD0_4", "F-16_chassesFront2_LOD0_5", "F-16_chassesFront3_LOD0_6", "F-16_whel_LOD0_36", "F-16_capFlont_LOD0_1"]
+const NOSE_GEAR_NAMES = [
+  "F-16_chassesFront1_LOD0_4",
+  "F-16_chassesFront2_LOD0_5",
+  "F-16_chassesFront3_LOD0_6",
+  "F-16_whel_LOD0_36",
+  "F-16_capFlont_LOD0_1",
+]
 const NOSE_GEAR_OFFSET = [0, 0, -0.02]
 
 // The main gear is placed to match the real F-16's 4.00 m wheelbase and
 // 2.36 m track, which puts the wheels just aft of the CG like on the real
 // aircraft. The legs are moved out sideways to get that track; the doors
 // only move aft, as they are already placed against the belly.
-const MAIN_GEAR_LEFT_LEG_NAMES = ["F-16_chassesL1_LOD0_7", "F-16_chassesL2_LOD0_8", "F-16_chassesL3_LOD0_9", "F-16_chassesL4_LOD0_10", "F-16_whelL_LOD0_37"]
-const MAIN_GEAR_RIGHT_LEG_NAMES = ["F-16_chassesR1_LOD0_11", "F-16_chassesR2_LOD0_12", "F-16_chassesR3_LOD0_13", "F-16_chassesR4_LOD0_14", "F-16_whelR_LOD0_38"]
+const MAIN_GEAR_LEFT_LEG_NAMES = [
+  "F-16_chassesL1_LOD0_7",
+  "F-16_chassesL2_LOD0_8",
+  "F-16_chassesL3_LOD0_9",
+  "F-16_chassesL4_LOD0_10",
+  "F-16_whelL_LOD0_37",
+]
+const MAIN_GEAR_RIGHT_LEG_NAMES = [
+  "F-16_chassesR1_LOD0_11",
+  "F-16_chassesR2_LOD0_12",
+  "F-16_chassesR3_LOD0_13",
+  "F-16_chassesR4_LOD0_14",
+  "F-16_whelR_LOD0_38",
+]
 const MAIN_GEAR_DOOR_NAMES = ["F-16_capL_LOD0_2", "F-16_capR_LOD0_3"]
 const MAIN_GEAR_OFFSET = [0, -0.04, -0.02]
 const MAIN_GEAR_TRACK_OFFSET = 0.07
@@ -868,9 +1051,15 @@ function loadAircraftModel(f16) {
           object.rotateX(90 * MathUtils.DEG2RAD)
           object.rotateY(180 * MathUtils.DEG2RAD)
 
+          separateHudSidePanels(object)
+          tonePaintSheen(object)
+          colourCockpitInterior(object)
+          separateCockpitSurroundings(object)
           enableShadows(object)
           f16.add(object)
           controlSurfaceRig = new ControlSurfaceRig(object)
+          cockpitHiddenParts = COCKPIT_HIDDEN_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
+          cockpitUnshadowedParts = COCKPIT_UNSHADOWED_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
         },
         (xhr) => {},
         (error) => {
@@ -946,6 +1135,149 @@ function loadLandingGear(f16) {
   )
 }
 
+// The two side panels either side of the HUD glass are part of the fuselage
+// mesh (LOD0) in the model, so they can't be hidden on their own - this moves
+// them into a mesh of their own, HUD_SidePanels, which the cockpit view hides
+// (see COCKPIT_HIDDEN_PARTS). They are the triangles that lie entirely inside
+// this box, meters in the aircraft frame (x right, y forward, z up, from the
+// centre of gravity) - two thin vertical plates, 0.10 to 0.14 m either side
+// of the centreline. Nothing else on the fuselage falls inside it.
+const HUD_SIDE_PANELS_BOX = { minAbsX: 0.09, maxAbsX: 0.15, minY: 5.79, maxY: 6.13, minZ: 0.58, maxZ: 0.88 }
+
+function separateHudSidePanels(object) {
+  const fuselage = object.getObjectByName("LOD0")
+  if (!fuselage) return
+
+  const box = HUD_SIDE_PANELS_BOX
+  const inside = (vertices) =>
+    vertices.every(
+      (p) =>
+        Math.abs(p.x) >= box.minAbsX &&
+        Math.abs(p.x) <= box.maxAbsX &&
+        p.y >= box.minY &&
+        p.y <= box.maxY &&
+        p.z >= box.minZ &&
+        p.z <= box.maxZ,
+    )
+
+  // the model's own vertices, taken into the aircraft frame
+  object.updateMatrix()
+  fuselage.updateMatrix()
+  const frame = object.matrix.clone().multiply(fuselage.matrix)
+
+  splitOffTriangles(fuselage, "HUD_SidePanels", frame, inside)
+}
+
+// The model's airframe material (Body in f16.mtl) has a strong and very
+// broad specular highlight - Ks 0.75 with Ns 8 - which spreads a reflection
+// of the sunlight over large parts of the airframe, tinting them with the
+// sun's colour from the cameras looking towards it. The F-16's grey paint is
+// matte, so it gets a faint, tighter sheen instead. Done before the cockpit interior is split off, which shares this
+// material in the exterior views.
+const PAINT_SPECULAR = 0x1a1a1a
+const PAINT_SHININESS = 20
+
+function tonePaintSheen(object) {
+  object.traverse((child) => {
+    if (!child.isMesh) return
+    for (const material of [child.material].flat()) {
+      if (material.name !== "Body") continue
+      material.specular.set(PAINT_SPECULAR)
+      material.shininess = PAINT_SHININESS
+    }
+  })
+}
+
+// Seen from the cockpit, the cockpit interior is painted grey - the
+// exterior views keep the model's own look. The model has no cockpit of its
+// own - the cockpit tub (floor, side walls, consoles, instrument panel, glare
+// shield) is part of the fuselage mesh, with the same texture as the outside
+// of the aircraft - so it is split off into a mesh of its own, together with
+// the inside faces of the canopy frame, and those get the grey material only
+// while the cockpit camera is drawing.
+//
+// The cockpit tub is the fuselage triangles lying entirely inside this box,
+// meters in the aircraft frame (x right, y forward, z up, from the centre of
+// gravity): under the canopy, and above the intake and nose gear structure
+// below the cockpit floor. The cockpit rim the canopy rails sit on is left as
+// it is, like the rails themselves.
+const COCKPIT_TUB_BOX = { maxAbsX: 0.46, minY: 4.05, maxY: 6.65, minZ: -0.5, maxZ: 0.75 }
+const COCKPIT_INTERIOR_COLOUR = 0x7a7a7a
+
+const cockpitInteriorMaterial = new MeshPhongMaterial({
+  color: COCKPIT_INTERIOR_COLOUR,
+  specular: 0x111111,
+  shininess: 10,
+})
+
+// the cockpit interior parts, with the material each has in the exterior views
+let cockpitInteriorParts = []
+
+// gives the cockpit interior its grey for the cockpit view, or its own
+// material back for the exterior views
+function paintCockpitInterior(inCockpit) {
+  for (const { mesh, exteriorMaterial } of cockpitInteriorParts) {
+    mesh.material = inCockpit ? cockpitInteriorMaterial : exteriorMaterial
+  }
+}
+
+function colourCockpitInterior(object) {
+  object.updateMatrix()
+  const frameOf = (mesh) => {
+    mesh.updateMatrix()
+    return object.matrix.clone().multiply(mesh.matrix)
+  }
+
+  const fuselage = object.getObjectByName("LOD0")
+  if (fuselage) {
+    const box = COCKPIT_TUB_BOX
+    const inTub = (vertices) =>
+      vertices.every(
+        (p) =>
+          Math.abs(p.x) <= box.maxAbsX && p.y >= box.minY && p.y <= box.maxY && p.z >= box.minZ && p.z <= box.maxZ,
+      )
+
+    const tub = splitOffTriangles(fuselage, "Cockpit_Interior", frameOf(fuselage), inTub)
+    if (tub) cockpitInteriorParts.push({ mesh: tub, exteriorMaterial: tub.material })
+  }
+
+  // the canopy frame's inside faces are the ones facing the pilot's eyes
+  const canopyFrame = object.getObjectByName("Canopy01")
+  if (canopyFrame) {
+    const triangle = new Triangle()
+    const normal = new Vector3()
+    const centre = new Vector3()
+    const facingEye = (vertices) => {
+      triangle.set(...vertices)
+      triangle.getNormal(normal)
+      triangle.getMidpoint(centre)
+      return normal.dot(centre.sub(EYE_POSITION).negate()) > 0
+    }
+
+    const inside = splitOffTriangles(canopyFrame, "Canopy_Inside", frameOf(canopyFrame), facingEye)
+    if (inside) cockpitInteriorParts.push({ mesh: inside, exteriorMaterial: inside.material })
+  }
+}
+
+// The fuselage around the canopy - every triangle entirely within this
+// distance of the pilot's eyes, meters - is moved into a mesh of its own,
+// Cockpit_Surroundings, so the cockpit view can switch off its self-shadows
+// (see COCKPIT_UNSHADOWED_PARTS). Beyond it, a shadow map texel only covers
+// a few pixels, and the self-shadows hold still.
+const COCKPIT_UNSHADOWED_RADIUS = 2.5
+
+function separateCockpitSurroundings(object) {
+  const fuselage = object.getObjectByName("LOD0")
+  if (!fuselage) return
+
+  object.updateMatrix()
+  fuselage.updateMatrix()
+  const frame = object.matrix.clone().multiply(fuselage.matrix)
+
+  const nearEye = (vertices) => vertices.every((p) => p.distanceTo(EYE_POSITION) <= COCKPIT_UNSHADOWED_RADIUS)
+  splitOffTriangles(fuselage, "Cockpit_Surroundings", frame, nearEye)
+}
+
 // the canopy glass is see-through, so it receives shadows but doesn't cast
 // any - otherwise the whole cockpit would sit in the canopy's shadow
 function enableShadows(object) {
@@ -992,18 +1324,8 @@ function tintGearToMatchBody(object) {
 function nextCamera() {
   currentCamera++
   currentCamera %= cameras.length
-  if (currentCamera === 0) {
-    f16.visible = false
-    hudPlane.visible = true
-  }
-  if (currentCamera === 1) {
-    f16.visible = true
-    hudPlane.visible = false
-  }
-  if (currentCamera === 2) {
-    f16.visible = true
-    hudPlane.visible = false
-  }
+  // the HUD only belongs in the cockpit - the airframe shows from every view
+  hudPlane.visible = currentCamera === 0
 }
 
 function keyboardHandler(keyboardEvent) {
@@ -1057,16 +1379,20 @@ function keyboardHandler(keyboardEvent) {
     case "x": // right pedal, yaw right
       movePedal(1)
       break
-    case "j": // external cam left
+    case "j": // cockpit: turn the view left - external cam: left
+      if (lookFromCockpit("j")) break
       externalCameraPosition.compassSpeed -= EXTERNAL_CAMERA_SLEW_STEP
       break
-    case "l": // external cam right
+    case "l": // cockpit: turn the view right - external cam: right
+      if (lookFromCockpit("l")) break
       externalCameraPosition.compassSpeed += EXTERNAL_CAMERA_SLEW_STEP
       break
-    case "i": // external cam up
+    case "i": // cockpit: look straight ahead - external cam: up
+      if (lookFromCockpit("i")) break
       externalCameraPosition.inclination -= 2
       break
-    case "k": // external cam down
+    case "k": // cockpit: look back - external cam: down
+      if (lookFromCockpit("k")) break
       externalCameraPosition.inclination += 2
       break
     case ",": // external cam nearer
@@ -1127,6 +1453,44 @@ function movePedal(direction) {
   } else {
     airplaneControlInput.yawPedal += direction * STICK_STEP
   }
+}
+
+// Points the pilot's view for a look key, if the cockpit camera is selected:
+// each press of j or l turns it 20 degrees further left or right, i turns it
+// back to straight ahead, and k to straight back. Returns whether the key was
+// used for that - in the other views the same keys move the external camera
+// instead.
+function lookFromCockpit(key) {
+  if (currentCamera !== 0) return false
+
+  // straight ahead and straight back are reached the shorter way round
+  const yaw = cockpitLook.targetYaw
+  switch (key) {
+    case "j":
+      cockpitLook.targetYaw = yaw + LOOK_STEP
+      break
+    case "l":
+      cockpitLook.targetYaw = yaw - LOOK_STEP
+      break
+    case "i":
+      cockpitLook.targetYaw = yaw - wrapDegrees(yaw)
+      break
+    case "k":
+      cockpitLook.targetYaw = yaw + wrapDegrees(LOOK_BACK - yaw)
+      break
+  }
+  return true
+}
+
+// glides the view towards where the pilot wants to look - easing in over
+// LOOK_GLIDE_TIME, but never faster than LOOK_GLIDE_RATE_MAX
+function updateCockpitLook(dt) {
+  const remaining = cockpitLook.targetYaw - cockpitLook.yaw
+  const step = remaining * (1 - Math.exp(-dt / LOOK_GLIDE_TIME))
+  const maxStep = LOOK_GLIDE_RATE_MAX * dt
+
+  cockpitLook.yaw += Math.max(-maxStep, Math.min(maxStep, step))
+  if (Math.abs(cockpitLook.targetYaw - cockpitLook.yaw) < 0.01) cockpitLook.yaw = cockpitLook.targetYaw
 }
 
 function keyUpHandler(keyboardEvent) {
