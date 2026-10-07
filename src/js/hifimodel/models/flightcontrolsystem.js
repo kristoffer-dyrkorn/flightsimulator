@@ -109,26 +109,40 @@ const GROUND_VANE_VALID_KT = 60
    loops instead. The inner one holds a flight path, which it damps well.
    The outer one slowly moves that flight path to hold 13 degrees: up when
    the angle of attack is below it (too fast, so climb and slow down), down
-   when it is above it (too slow). Its gains make it about critically damped,
-   and several times slower than the inner loop. The stick moves the
-   flight path directly while it is off centre, and the outer loop brings
-   the angle of attack back to 13 degrees once it is released.
+   when it is above it (too slow). It is deliberately gentle - the real jet
+   is speed stable, not locked to its trim angle of attack, and returns to
+   it over several seconds, with a little of the phugoid left - so ground
+   effect still makes the jet float, and a gust or a power change shows.
+
+   While the pilot holds the stick, the outer loop stands aside and the
+   stick alone moves the flight path - in a flare, the angle of attack goes
+   up as the pilot pulls, as it should, and a go-around climbs as steeply as
+   the pilot asks. It takes over again from wherever the pilot left the
+   flight path, LANDING_STICK_RELEASE_DELAY after the stick is centred.
 
    Everything ends up as a g command, capped at LANDING_NZ_MAX so lowering
    the gear well above approach speed eases the nose up rather than pulling
    hard, and the angle of attack limiter below still applies. The flight
    path is the one over the ground, as a glide path is. */
 const LANDING_AOA = 13 /* deg held with the stick centred */
-const LANDING_AOA_PATH_P = 8 /* deg of flight path per deg of angle of attack error */
-const LANDING_AOA_PATH_I = 0.8 /* deg/s of flight path per deg of angle of attack error */
+const LANDING_AOA_PATH_P = 3 /* deg of flight path per deg of angle of attack error */
+const LANDING_AOA_PATH_I = 0.12 /* deg/s of flight path per deg of angle of attack error */
+const LANDING_STICK_DEADBAND = 0.01 /* stick deflection that counts as centred */
+const LANDING_STICK_RELEASE_DELAY = 1.0 /* s after the stick is centred */
 
-/* How steep a climb or descent the angle of attack hold may ask for. The
-   climb is kept small, so lowering the gear above approach speed slows the
-   jet down nearly level instead of pitching the nose well up. The descent has to
-   allow for gliding at idle with the gear and speedbrakes out, which at 13
-   degrees takes a flight path of nearly 20 degrees down. */
+/* How steep a climb or descent the angle of attack hold may ask for - the
+   pilot's own stick inputs can take the flight path anywhere within
+   LANDING_PATH_PILOT_MAX. The climb is kept small, so lowering the gear above
+   approach speed slows the jet down nearly level instead of pitching the
+   nose well up. The descent has to allow for gliding at idle with the gear
+   and speedbrakes out, which at 13 degrees takes a flight path of nearly 20
+   degrees down. If the pilot has left the flight path outside these when
+   the angle of attack hold takes over again, it is brought back within them
+   at LANDING_PATH_RETURN_RATE, not all at once. */
 const LANDING_PATH_CLIMB_MAX = 2 /* deg */
 const LANDING_PATH_DESCENT_MAX = 20 /* deg */
+const LANDING_PATH_PILOT_MAX = 30 /* deg, climb or descent */
+const LANDING_PATH_RETURN_RATE = 1 /* deg/s */
 const LANDING_PATH_RATE_MAX = 12 /* deg/s of flight path change at full stick */
 const LANDING_PATH_GAIN = 1.0 /* deg/s of flight path rate per deg of flight path error */
 const LANDING_NZ_MAX = 2.0 /* most g landing mode may pull */
@@ -240,6 +254,14 @@ export default class FlightControlSystem {
        the flight path it is holding, degrees */
     this.landingMode = false
     this.landingPathIntegral = 0
+
+    /* landing mode: the flight path it is holding, degrees, the angle of
+       attack loop's proportional part when it last ran, and how long the
+       stick has been centred, seconds */
+    this.landingPathTarget = 0
+    this.landingAoaTerm = 0
+    this.landingStickCentredFor = 0
+    this.landingHoldingAoa = false
   }
 
   /**
@@ -331,27 +353,52 @@ export default class FlightControlSystem {
       const pathRateCommand = input.pitchStick * LANDING_PATH_RATE_MAX
       const aoaError = LANDING_AOA - alpha
 
+      // the angle of attack hold only runs once the stick has been centred
+      // for a moment - see LANDING_STICK_RELEASE_DELAY
+      this.landingStickCentredFor =
+        Math.abs(input.pitchStick) > LANDING_STICK_DEADBAND ? 0 : this.landingStickCentredFor + dt
+      const holdingAoa = this.landingStickCentredFor >= LANDING_STICK_RELEASE_DELAY
+
       // start from the flight path the aircraft is already on
-      if (!this.landingMode) this.landingPathIntegral = flightPath - LANDING_AOA_PATH_P * aoaError
+      if (!this.landingMode) {
+        this.landingPathTarget = flightPath
+        this.landingAoaTerm = holdingAoa ? LANDING_AOA_PATH_P * aoaError : 0
+        this.landingPathIntegral = flightPath - this.landingAoaTerm
+        this.landingHoldingAoa = holdingAoa
+      }
 
-      this.landingPathIntegral = limit(
-        this.landingPathIntegral + (LANDING_AOA_PATH_I * aoaError + pathRateCommand) * dt,
-        -LANDING_PATH_DESCENT_MAX,
-        LANDING_PATH_CLIMB_MAX,
-      )
+      // While the angle of attack hold runs, its proportional part follows
+      // the error; while it stands aside, that part stays where it was. At
+      // the moment it takes over again, the integral absorbs the change, so
+      // the target flight path carries on from where the pilot left it
+      // without a jump.
+      const aoaTerm = holdingAoa ? LANDING_AOA_PATH_P * aoaError : this.landingAoaTerm
+      if (holdingAoa && !this.landingHoldingAoa) this.landingPathIntegral += this.landingAoaTerm - aoaTerm
+      this.landingAoaTerm = aoaTerm
+      this.landingHoldingAoa = holdingAoa
 
-      const pathTarget = limit(
-        this.landingPathIntegral + LANDING_AOA_PATH_P * aoaError,
-        -LANDING_PATH_DESCENT_MAX,
-        LANDING_PATH_CLIMB_MAX,
-      )
+      this.landingPathIntegral += ((holdingAoa ? LANDING_AOA_PATH_I * aoaError : 0) + pathRateCommand) * dt
 
-      // while the target is held at a limit, keep the integral where it
-      // puts the target exactly on that limit - otherwise it winds up
-      // against it, and the flight path overshoots once the angle of
-      // attack comes back
-      this.landingPathIntegral = pathTarget - LANDING_AOA_PATH_P * aoaError
-      const pathRate = pathRateCommand + LANDING_PATH_GAIN * (pathTarget - flightPath)
+      let pathTarget = limit(this.landingPathIntegral + aoaTerm, -LANDING_PATH_PILOT_MAX, LANDING_PATH_PILOT_MAX)
+
+      // the angle of attack hold's own limits, eased back into rather than
+      // snapped to if the pilot has left the flight path outside them
+      if (holdingAoa) {
+        const step = LANDING_PATH_RETURN_RATE * dt
+        const lowest = Math.min(-LANDING_PATH_DESCENT_MAX, this.landingPathTarget + step)
+        const highest = Math.max(LANDING_PATH_CLIMB_MAX, this.landingPathTarget - step)
+        pathTarget = limit(pathTarget, lowest, highest)
+      }
+
+      // keep the integral where it puts the target exactly on the limit it
+      // was held to - otherwise it winds up against it, and the flight path
+      // overshoots once the angle of attack comes back
+      this.landingPathIntegral = pathTarget - aoaTerm
+      this.landingPathTarget = pathTarget
+      // the stick moves the target flight path, above, and the aircraft
+      // follows the target - adding the stick's rate here too as well makes
+      // it overshoot, carrying on climbing after the stick is released
+      const pathRate = LANDING_PATH_GAIN * (pathTarget - flightPath)
 
       // holding the flight path against gravity takes cos(flight path) g,
       // and turning it at that rate takes this much more

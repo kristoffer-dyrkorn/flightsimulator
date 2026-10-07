@@ -14,33 +14,33 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 - Landing on runways is supported
 - Internal and external views
 - Synthesized, dynamic engine sound
-- Joystick support (only tested in Chrome, using an NXT Gladiator)
+- Joystick support (only tested in Chrome using an NXT Gladiator)
 - Highly efficient terrain rendering based on tiling and dynamic loading of data
 - Works on mobiles (but no steering implemented so far)
 
 ## Controls
 
-To steer the aircraft up, down, left or right, use the arrow keys. If you have an NXT Gladiator joystick it will also work.
+Use the arrow keys to to steer the aircraft up, down, left or right. If you connect an NXT Gladiator joystick it should also work.
 
-The aircraft has a flight control system (FCS), so you do not steer it directly. The FCS decides how the control surfaces move in order to make the aircraft do what you want.
+The simulator has a flight control system (FCS). This means you provide input, and the FCS decides how the control surfaces should move to make the aircraft go in that direction. The FCS will keep the aircraft stable at low speeds and will also limit sharp turns to not overstress the airframe.
 
-- `q` and `a`: throttle (afterburner kicks in at >80% throttle)
+- `q` and `a`: throttle (the afterburner kicks in above 80% throttle)
 - `s` set throttle to idle
-- `1` and `2`: decrease/increase air brakes
+- `1` and `2`: close / open the air brakes
 - `g` extend/retract landing gears and also enable/disable landing mode
 - `z` and `x`: rudder (nose gear control when on a runway)
 - `b` wheel brakes when on a runway
 - `h`: toggle HUD on and off
-- space bar: cycle camera views (cockpit camera / follower camera / external camera)
-- `j` and `l`: rotate the external camera left and right
-- `i` and `k`: rotate the external camera up and down.
+- space bar: cycle views (cockpit view / follower camera / external camera)
+- `j` and `l`: rotate the cockpit view or external camera left and right
+- `i` and `k`: rotate the external camera up and down
 - `,` and `.`: move the external camera nearer/further away
 
-## Landing the aircraft
+## Landing the plane
 
-You can land the aircraft on any of Norway's runways. For a successful landing you must land inside the runway perimeter, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees.
+You can land the plane on any of Norway's runways. For a successful landing you must touch down inside the perimeter of the runway, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees.
 
-The FCS has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of 13 degrees, normal for an F16 on approach. In this mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
+The flight control system has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of around 13 degrees, which is normal for an F16 on approach. When in landing mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
 With the gears down, a throttle setting of around 20% and full air brakes will give you a speed of around 140 knots and a suitable glide path of 3 degrees. You will need to flare before touchdown. At touchdown, set the throttle to idle and apply wheel brakes.
 
 ## Screenshots
@@ -52,6 +52,13 @@ With the gears down, a throttle setting of around 20% and full air brakes will g
 ![Landing](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
 
 ## Release notes
+
+October 2026:
+
+- Added ground effect simulation
+- Improved aircraft rendering (colors, self-shadowing)
+- Fuselage is included in cockpit view rendering
+- Now possible to look left and right in cockpit view
 
 September 2026:
 

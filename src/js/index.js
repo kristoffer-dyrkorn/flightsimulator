@@ -6,7 +6,7 @@ import {
   Color,
   FogExp2,
   DirectionalLight,
-  HemisphereLight,
+  AmbientLight,
   PerspectiveCamera,
   Object3D,
   PlaneGeometry,
@@ -156,19 +156,8 @@ aircraftScene.fog = scene.fog
 // shifted aircraft scene's frame
 const aircraftCamera = new PerspectiveCamera()
 
-// Daylight for the f16 model: the sun, and the light from the sky above and
-// the ground below. A sunlit surface is several times brighter than one
-// facing the ground, which only gets the light the ground reflects - so
-// rather than an ambient light, which lights the underside as brightly as
-// the top, a hemisphere light: sky blue from above, a grey-brown ground
-// bounce from below.
-const SUN_COLOUR = 0xfff5ec
-const SUN_INTENSITY = 1.3
-const SKY_COLOUR = 0xc7d4ed
-const GROUND_BOUNCE_COLOUR = 0x958d80
-const SKY_INTENSITY = 0.9
-
-const directionalLight = new DirectionalLight(SUN_COLOUR, SUN_INTENSITY)
+// add lights to the scene, to propely display the f16 model
+const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
 aircraftScene.add(directionalLight)
 aircraftScene.add(directionalLight.target)
 
@@ -214,13 +203,8 @@ directionalLight.shadow.camera.near = SHADOW_LIGHT_DISTANCE - SHADOW_EXTENT
 directionalLight.shadow.camera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
 directionalLight.shadow.normalBias = SHADOW_NORMAL_BIAS
 
-// A hemisphere light takes its "up" from its position, seen from the scene's
-// origin - which, with the aircraft scene shifted to the aircraft while it is
-// drawn (see aircraftScene), means placing it straight above the aircraft
-// each frame, like the sun (see drawScene).
-const hemisphereLight = new HemisphereLight(SKY_COLOUR, GROUND_BOUNCE_COLOUR, SKY_INTENSITY)
-const UP = new Vector3(0, 0, 1)
-aircraftScene.add(hemisphereLight)
+const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
+aircraftScene.add(ambientLight)
 
 const groundShadow = new GroundShadow(aircraftScene, GROUND_SHADOW_OPACITY)
 
@@ -230,7 +214,7 @@ const cameras = []
 // main camera - internal view from cockpit
 const camera = new PerspectiveCamera()
 camera.up.set(0, 0, 1)
-camera.fov = 45
+camera.fov = 55
 camera.near = 1
 camera.far = 50000
 
@@ -327,13 +311,30 @@ const HUD_DISTANCE = 0.625 // m
 const HUD_FIELD_OF_VIEW = 2 * Math.atan(0.5 / 2.2) // radians, across the panel
 const HUD_SIZE = 2 * HUD_DISTANCE * Math.tan(HUD_FIELD_OF_VIEW / 2) // m
 
-// the HUD draws its symbology to match the angle the panel covers
-hud.setFieldOfView(HUD_FIELD_OF_VIEW)
+// The HUD glass's bottom edge sits just above the airframe in front of the
+// pilot - the glare shield and the nose - as seen from EYE_POSITION, so the
+// HUD's contents never show on top of it. Where that is depends on the eye
+// position and the model, so it is measured from the model once it has
+// loaded (see placeHudAboveAirframe); until then, this. Degrees below the
+// line of sight straight ahead.
+const HUD_BOTTOM_ELEVATION_DEFAULT = -14
+const HUD_CLEARANCE = 0.3 // degrees between the airframe and the glass
 
 const hudPlane = new Mesh(hudGeometry, hudMaterial)
-hudPlane.position.set(0, 0, -HUD_DISTANCE)
 hudPlane.scale.set(HUD_SIZE, HUD_SIZE, 1)
 hudScene.add(hudPlane)
+
+// Moves the HUD glass up or down so its bottom edge is at bottomElevation
+// (degrees from the line of sight), and has the HUD draw its symbology to
+// match. The panel stays square on to the line of sight, so its contents
+// stay lined up with the world outside wherever it is.
+function placeHud(bottomElevation) {
+  const centreHeight = HUD_DISTANCE * Math.tan(bottomElevation * MathUtils.DEG2RAD) + HUD_SIZE / 2 // m
+  hudPlane.position.set(0, centreHeight, -HUD_DISTANCE)
+  hud.setGeometry(HUD_FIELD_OF_VIEW, centreHeight / HUD_DISTANCE)
+}
+
+placeHud(HUD_BOTTOM_ELEVATION_DEFAULT)
 
 // load the actual aircraft model into the scene
 loadAircraftModel(f16)
@@ -812,7 +813,6 @@ function drawScene(currentFrametime) {
   // keep the shadow camera centered on the aircraft
   directionalLight.target.position.copy(f16.position)
   directionalLight.position.copy(f16.position).addScaledVector(LIGHT_DIRECTION, SHADOW_LIGHT_DISTANCE)
-  hemisphereLight.position.copy(f16.position).add(UP)
   updateGroundShadow()
 
   chaseObject.update(f16, frameTime)
@@ -1060,6 +1060,7 @@ function loadAircraftModel(f16) {
           controlSurfaceRig = new ControlSurfaceRig(object)
           cockpitHiddenParts = COCKPIT_HIDDEN_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
           cockpitUnshadowedParts = COCKPIT_UNSHADOWED_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
+          placeHudAboveAirframe(object)
         },
         (xhr) => {},
         (error) => {
@@ -1170,9 +1171,10 @@ function separateHudSidePanels(object) {
 
 // The model's airframe material (Body in f16.mtl) has a strong and very
 // broad specular highlight - Ks 0.75 with Ns 8 - which spreads a reflection
-// of the sunlight over large parts of the airframe, tinting them with the
-// sun's colour from the cameras looking towards it. The F-16's grey paint is
-// matte, so it gets a faint, tighter sheen instead. Done before the cockpit interior is split off, which shares this
+// of the sunlight's own colour, a warm pinkish beige, over large parts of the
+// airframe, and gives it a reddish tint from the cameras looking towards the
+// sun. The F-16's grey paint is matte, so it gets a faint, tighter sheen
+// instead. Done before the cockpit interior is split off, which shares this
 // material in the exterior views.
 const PAINT_SPECULAR = 0x1a1a1a
 const PAINT_SHININESS = 20
@@ -1233,8 +1235,7 @@ function colourCockpitInterior(object) {
     const box = COCKPIT_TUB_BOX
     const inTub = (vertices) =>
       vertices.every(
-        (p) =>
-          Math.abs(p.x) <= box.maxAbsX && p.y >= box.minY && p.y <= box.maxY && p.z >= box.minZ && p.z <= box.maxZ,
+        (p) => Math.abs(p.x) <= box.maxAbsX && p.y >= box.minY && p.y <= box.maxY && p.z >= box.minZ && p.z <= box.maxZ,
       )
 
     const tub = splitOffTriangles(fuselage, "Cockpit_Interior", frameOf(fuselage), inTub)
@@ -1257,6 +1258,39 @@ function colourCockpitInterior(object) {
     const inside = splitOffTriangles(canopyFrame, "Canopy_Inside", frameOf(canopyFrame), facingEye)
     if (inside) cockpitInteriorParts.push({ mesh: inside, exteriorMaterial: inside.material })
   }
+}
+
+// Puts the HUD glass just above the highest point of the airframe the pilot
+// sees ahead of them, within the HUD's width - the glare shield and the nose
+// - leaving out the parts hidden in the cockpit view and the canopy glass,
+// which the pilot looks through. Only what is at least LOOK_AHEAD_MIN
+// meters in front of the eye counts: closer than that is the HUD's own
+// mounting, beside and below the glass.
+const LOOK_AHEAD_MIN = 0.3 // m
+
+function placeHudAboveAirframe(object) {
+  f16.updateMatrixWorld(true)
+  const toAircraft = f16.matrixWorld.clone().invert()
+  const halfWidth = HUD_FIELD_OF_VIEW / 2
+  const point = new Vector3()
+  let highest = -Infinity
+
+  object.traverse((mesh) => {
+    if (!mesh.isMesh || COCKPIT_HIDDEN_PARTS.includes(mesh.name)) return
+    if ([mesh.material].flat().some((material) => material.name === "Glass")) return
+
+    const frame = toAircraft.clone().multiply(mesh.matrixWorld)
+    const position = mesh.geometry.attributes.position
+    for (let i = 0; i < position.count; i++) {
+      point.fromBufferAttribute(position, i).applyMatrix4(frame).sub(EYE_POSITION)
+      if (point.y < LOOK_AHEAD_MIN || Math.abs(Math.atan2(point.x, point.y)) > halfWidth) continue
+      highest = Math.max(highest, Math.atan2(point.z, Math.hypot(point.x, point.y)))
+    }
+  })
+
+  if (highest === -Infinity) return
+  placeHud(highest * MathUtils.RAD2DEG + HUD_CLEARANCE)
+  console.log("HUD glass bottom edge at %s degrees", (highest * MathUtils.RAD2DEG + HUD_CLEARANCE).toFixed(1))
 }
 
 // The fuselage around the canopy - every triangle entirely within this

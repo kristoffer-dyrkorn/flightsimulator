@@ -6,6 +6,10 @@ const AIRSPEED_ABOVE_KT = 80
 const AOA_SHOWN_ABOVE_KT = 40
 const FLIGHT_PATH_SHOWN_ABOVE_KT = 10
 
+// how far from the canvas centre, in pixels, pitch ladder lines are still
+// drawn - short of the canvas edge at 400, so the labels fit too
+const LADDER_EXTENT = 370
+
 export default class HUDObject {
   constructor(canvas) {
     this.canvas = canvas
@@ -17,15 +21,15 @@ export default class HUDObject {
     this.canvas.height = this.height
 
     this.ctx = this.canvas.getContext("2d")
-    this.ctx.lineWidth = 1.7
-    this.ctx.font = "1.5em Tahoma"
+    this.ctx.lineWidth = 3
+    this.ctx.font = "2.2em Tahoma"
     this.ctx.textBaseline = "middle"
     this.ctx.fillStyle = "#20ff40"
     this.ctx.strokeStyle = "#20ff40"
 
-    // see setFieldOfView - until it is called, the angle the HUD has always
-    // covered
-    this.setFieldOfView(2 * Math.atan(0.5 / 2.2))
+    // see setGeometry - until it is called, the angle the HUD has always
+    // covered, centred on the line of sight
+    this.setGeometry(2 * Math.atan(0.5 / 2.2), 0)
 
     // raw sink rate is a per-step derivative and jitters between frames -
     // smoothed for display by averaging over a trailing 1 second window,
@@ -94,6 +98,7 @@ export default class HUDObject {
     // ground - not the angle of attack, which in gusty air jumps around
     // with every gust while the flight path itself hardly changes
     this.flightPathAngle = airplaneState.alpha
+    this.flightPathSideslip = airplaneState.beta
 
     this.g = airplaneState.nz
 
@@ -116,29 +121,25 @@ export default class HUDObject {
 
     this.ctx.beginPath()
 
-    let adjust = 0
     switch (align) {
       case "right":
-        adjust = box[0] - 1.5
-        this.ctx.moveTo(x - adjust, y - box[1] / 2 - 2)
-        this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 2)
-        this.ctx.lineTo(x - adjust + box[0] + 12, y - box[1] / 2 - 1.5 + box[1] / 2)
-        this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 1.5 + box[1])
-        this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5 + box[1])
-        this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5)
+        this.ctx.moveTo(x - box[0], y - box[1] / 2 - 2)
+        this.ctx.lineTo(x, y - box[1] / 2 - 2)
+        this.ctx.lineTo(x + 12, y - box[1] / 2 - 1.5 + box[1] / 2)
+        this.ctx.lineTo(x, y - box[1] / 2 - 1.5 + box[1])
+        this.ctx.lineTo(x - box[0], y - box[1] / 2 - 1.5 + box[1])
+        this.ctx.lineTo(x - box[0], y - box[1] / 2 - 1.5)
         break
       case "center":
-        adjust = box[0] / 2
-        this.ctx.rect(x - adjust, y - box[1] / 2 - 2, box[0], box[1])
+        this.ctx.rect(x - box[0] / 2 - 5, y - box[1] / 2 - 2, box[0] + 10, box[1])
         break
       case "left":
-        adjust = 2.5
-        this.ctx.moveTo(x - adjust, y - box[1] / 2 - 2)
-        this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 2)
-        this.ctx.lineTo(x - adjust + box[0], y - box[1] / 2 - 1.5 + box[1])
-        this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5 + box[1])
-        this.ctx.lineTo(x - adjust - 12, y - box[1] / 2 - 1.5 + box[1] / 2)
-        this.ctx.lineTo(x - adjust, y - box[1] / 2 - 1.5)
+        this.ctx.moveTo(x, y - box[1] / 2 - 2)
+        this.ctx.lineTo(x + box[0], y - box[1] / 2 - 2)
+        this.ctx.lineTo(x + box[0], y - box[1] / 2 - 1.5 + box[1])
+        this.ctx.lineTo(x, y - box[1] / 2 - 1.5 + box[1])
+        this.ctx.lineTo(x - 12, y - box[1] / 2 - 1.5 + box[1] / 2)
+        this.ctx.lineTo(x, y - box[1] / 2 - 1.5)
         break
     }
 
@@ -146,15 +147,20 @@ export default class HUDObject {
   }
 
   /**
-   * The angle, seen from the pilot's eyes, that the canvas covers across its
-   * width (and height - it is square) once it is drawn on the HUD panel.
-   * The pitch ladder and the flight path marker are placed from it, so they
-   * line up with the world outside.
+   * Where the canvas sits, seen from the pilot's eyes, once it is drawn on
+   * the HUD panel: the angle it covers across its width (and height - it is
+   * square), and how far the panel's centre is above the line of sight
+   * straight ahead. The pitch ladder and the flight path marker are placed
+   * from these, relative to where the line of sight crosses the canvas
+   * (boresightY), so they line up with the world outside.
    *
-   * @param fieldOfView  radians
+   * @param fieldOfView     radians
+   * @param centreTangent   height of the panel's centre above the line of
+   *                        sight, divided by its distance from the eyes
    */
-  setFieldOfView(fieldOfView) {
+  setGeometry(fieldOfView, centreTangent) {
     this.pixelsPerTangent = this.height / 2 / Math.tan(fieldOfView / 2)
+    this.boresightY = this.height / 2 + this.pixelsPerTangent * centreTangent
   }
 
   // How far from the centre of the HUD, in pixels, something an angle away
@@ -165,7 +171,7 @@ export default class HUDObject {
   }
 
   drawPitchLadder() {
-    this.ctx.translate(this.width / 2, this.height / 2)
+    this.ctx.translate(this.width / 2, this.boresightY)
     this.ctx.rotate(-this.roll)
 
     const pitch = this.pitch * MathUtils.RAD2DEG
@@ -176,9 +182,8 @@ export default class HUDObject {
     for (let deg = 0; deg <= 90; deg += 5) {
       const offset = -this.angleToPixels(deg - pitch)
 
-      // only draw pitch lines if they are within +-8 deg of current pitch
-      // ie within borders of the HUD
-      if (Math.abs(pitch - deg) < 8) {
+      // only draw pitch lines that fit on the HUD
+      if (Math.abs(offset + this.boresightY - this.height / 2) < LADDER_EXTENT) {
         if (deg === 0) {
           // horizon lines are extra wide
           this.ctx.moveTo(-350, offset)
@@ -189,9 +194,9 @@ export default class HUDObject {
         } else {
           this.ctx.moveTo(-150, offset)
           this.ctx.lineTo(-50, offset)
-          this.ctx.lineTo(-50, offset + 10)
+          this.ctx.lineTo(-50, offset + 15)
 
-          this.ctx.moveTo(50, offset + 10)
+          this.ctx.moveTo(50, offset + 15)
           this.ctx.lineTo(50, offset)
           this.ctx.lineTo(150, offset)
 
@@ -211,14 +216,13 @@ export default class HUDObject {
     for (let deg = -90; deg < 0; deg += 5) {
       const offset = -this.angleToPixels(deg - pitch)
 
-      // only draw pitch lines if they are within +-8 deg of current pitch
-      // ie within borders of the HUD
-      if (Math.abs(pitch - deg) < 8) {
+      // only draw pitch lines that fit on the HUD
+      if (Math.abs(offset + this.boresightY - this.height / 2) < LADDER_EXTENT) {
         this.ctx.moveTo(-150, offset)
         this.ctx.lineTo(-50, offset)
-        this.ctx.lineTo(-50, offset - 10)
+        this.ctx.lineTo(-50, offset - 15)
 
-        this.ctx.moveTo(50, offset - 10)
+        this.ctx.moveTo(50, offset - 15)
         this.ctx.lineTo(50, offset)
         this.ctx.lineTo(150, offset)
 
@@ -233,22 +237,31 @@ export default class HUDObject {
     this.ctx.setTransform(1, 0, 0, 1, 0, 0)
   }
 
+  // The flight path marker is where the velocity over the ground points, as
+  // seen through the HUD: below the nose by the angle of attack, and to the
+  // side by the sideslip - which in a crosswind is the drift, so the marker
+  // shows where the aircraft is actually tracking. On the HUD panel a
+  // velocity (u, v, w) in body axes lands at (v / u, w / u) in tangent
+  // units, which in angles is tan(sideslip) / cos(angle of attack) across,
+  // and tan(angle of attack) down.
   drawFlightPathMarker() {
+    const across = (this.pixelsPerTangent * Math.tan(this.flightPathSideslip)) / Math.cos(this.flightPathAngle)
     const offset = this.angleToPixels(MathUtils.RAD2DEG * this.flightPathAngle)
+    const x = this.width / 2 + across
 
     this.ctx.beginPath()
-    this.ctx.arc(this.width / 2, offset + this.height / 2, 10, 0, 2 * Math.PI)
+    this.ctx.arc(x, offset + this.boresightY, 10, 0, 2 * Math.PI)
     this.ctx.stroke()
 
     this.ctx.beginPath()
-    this.ctx.moveTo(this.width / 2, offset + this.height / 2 - 10)
-    this.ctx.lineTo(this.width / 2, offset + this.height / 2 - 22)
+    this.ctx.moveTo(x, offset + this.boresightY - 10)
+    this.ctx.lineTo(x, offset + this.boresightY - 22)
 
-    this.ctx.moveTo(this.width / 2 - 35, offset + this.height / 2)
-    this.ctx.lineTo(this.width / 2 - 10, offset + this.height / 2)
+    this.ctx.moveTo(x - 35, offset + this.boresightY)
+    this.ctx.lineTo(x - 10, offset + this.boresightY)
 
-    this.ctx.moveTo(this.width / 2 + 10, offset + this.height / 2)
-    this.ctx.lineTo(this.width / 2 + 35, offset + this.height / 2)
+    this.ctx.moveTo(x + 10, offset + this.boresightY)
+    this.ctx.lineTo(x + 35, offset + this.boresightY)
 
     this.ctx.stroke()
   }
@@ -258,23 +271,23 @@ export default class HUDObject {
 
     const hText = ("" + this.heading).padStart(3, "0")
 
-    this.drawText(hText, "center", 0.5 * this.width, 0.9 * this.height)
+    this.drawText(hText, "center", 0.5 * this.width, 0.89 * this.height)
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
     const aoaText = this.showAoa ? Math.round(this.aoa * MathUtils.RAD2DEG) : "--"
 
-    this.ctx.fillText(`AOA ${aoaText}`, 30, 0.82 * this.height)
-    this.ctx.fillText(`M ${this.mach}`, 30, 0.86 * this.height)
-    this.ctx.fillText(`THR ${this.throttle}`, 30, 0.9 * this.height)
+    this.ctx.fillText(`AOA ${aoaText}`, 15, 0.8 * this.height)
+    this.ctx.fillText(`M ${this.mach}`, 15, 0.85 * this.height)
+    this.ctx.fillText(`THR ${this.throttle}`, 15, 0.9 * this.height)
 
     if (this.throttle > 77) {
-      this.ctx.fillText(`AB`, 30, 0.94 * this.height)
+      this.ctx.fillText(`AB`, 155, 0.9 * this.height)
     }
 
     const gText = "" + this.g.toFixed(1)
 
-    this.ctx.fillText(`${gText}G`, 30, 0.2 * this.height)
+    this.ctx.fillText(`${gText} G`, 15, 0.2 * this.height)
 
     this.drawPitchLadder()
     if (this.showFlightPath) this.drawFlightPathMarker()

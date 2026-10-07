@@ -5,6 +5,7 @@ import TurbulenceModel from "./models/turbulencemodel.js"
 import WindModel from "./models/windmodel.js"
 import LandingGearModel from "./models/landinggearmodel.js"
 import { mixFlaperons } from "./flaperons.js"
+import { groundEffectLiftFactor } from "./models/groundeffect.js"
 import StateVector from "./statevector.js"
 import SimulationConstants from "./simulationconstants.js"
 import {
@@ -323,7 +324,12 @@ export default class F16Simulation {
     const CD_tef = SimulationConstants.TEF_CD_PER_RAD * tefRad
 
     const CD_mach = CD + this.compressibilityModel.waveDrag + CD_gear + CD_tef
-    const CL_mach = (CL + CL_tef) * this.compressibilityModel.liftFactor
+    /* more lift close to the ground - see groundeffect.js. The ground's
+       elevation is the one the landing gear model works against, so before
+       it has been measured the aircraft is nowhere near it, and this is 1. */
+    const groundEffect = groundEffectLiftFactor(alt - this.landingGearModel.groundAlt)
+
+    const CL_mach = (CL + CL_tef) * groundEffect * this.compressibilityModel.liftFactor
 
     const Cx_mach = -CD_mach * caAero + CL_mach * saAero
     const Cz_mach = -CD_mach * saAero - CL_mach * caAero
