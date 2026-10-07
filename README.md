@@ -40,8 +40,8 @@ The simulator has a flight control system (FCS). This means you provide input, a
 
 You can land the plane on any of Norway's runways. For a successful landing you must touch down inside the perimeter of the runway, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees.
 
-The flight control system has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of around 13 degrees, which is normal for an F16 on approach. When in landing mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
-With the gears down, a throttle setting of around 20% and full air brakes will give you a speed of around 140 knots and a suitable glide path of 3 degrees. You will need to flare before touchdown. At touchdown, set the throttle to idle and apply wheel brakes.
+The flight control system has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of around 13 degrees (normal for an F16 on approach) if you let go of the stick. When in landing mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
+With the gears down, a throttle setting of around 20% and full air brakes will give you a speed of around 140 knots and a suitable glide path of 3 degrees. You will need to flare before touchdown. Just before touchdown, set the throttle to idle and then apply wheel brakes when you are on the ground.
 
 ## Screenshots
 
