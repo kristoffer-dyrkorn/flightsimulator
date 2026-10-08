@@ -53,14 +53,16 @@ With the gears down, a throttle setting of around 20% and full air brakes will g
 
 ## Release notes
 
-October 2026:
+Features after July 2025 have been made using AI.
+
+#### October 2026:
 
 - Added ground effect simulation
 - Improved aircraft rendering (colors, self-shadowing)
 - Fuselage is included in cockpit view rendering
-- Now possible to look left and right in cockpit view
+- You can now turn the head left and right in cockpit view
 
-September 2026:
+#### September 2026:
 
 - Added von Kármán wind turbulence model
 - Added support for landing the aircraft on all of Norway's runways
@@ -73,7 +75,7 @@ September 2026:
 - Improved ground textures (doubled the resolution and removed various artifacts)
 - Fixed ground texture displacement bug
 
-August 2026:
+#### August 2026:
 
 - Use quaternions instead of Euler angles in the physics model, avoids gimbal lock and improves numerical robustness
 - Now calculates the compass direction correctly
@@ -87,28 +89,28 @@ August 2026:
 - Added air compressibility model (transonic drag)
 - Switched from Euler integration to RK4 integration in the physics model, improving accuracy
 
-July 2025:
+#### July 2025:
 
 - Upgraded `three.js`. Switched data formats, now using GLB for meshes and KTX2 for textures.
 - Tests for ground collisions
 
-June 2025:
+#### June 2025:
 
 - Improved flight dynamics, now incorporating the "high fidelity model" for the F-16, as described in [NASA-TN-D-8176](https://ntrs.nasa.gov/citations/19760017178).
 
-May 2025:
+#### May 2025:
 
 - Implemented a simple HUD
 - Significantly better colors and detail in the imagery - based on orthophotos of Norway and color-corrected Sentinel-2 images from 2022.
 - Added spatial audio
 
-July 2021:
+#### July 2021:
 
 - Audio problems are fixed, now using audio worklets.
 - Most prominent tiles are loaded first, reducing apparent loading times.
 - Updated `three.js`.
 
-April 2021:
+#### April 2021:
 
 - Updated satellite photos, taken summer/fall 2019, giving better image quality and more realistic colors.
 - New external cameras: Press `space bar` to cycle between internal camera (cockpit), "follower camera" and external camera.
