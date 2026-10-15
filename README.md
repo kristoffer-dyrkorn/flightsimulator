@@ -31,6 +31,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 - `z` and `x`: rudder (nose gear control when on a runway)
 - `b` wheel brakes when on a runway
 - `h`: toggle HUD on and off
+- `t`: toggle turbulence and wind on and off
 - space bar: cycle views (cockpit view / follower camera / external camera)
 - `j` and `l`: rotate the cockpit view or external camera left and right
 - `i` and `k`: rotate the external camera up and down
@@ -40,8 +41,11 @@ The simulator has a flight control system (FCS). This means you provide input, a
 
 You can land the plane on any of Norway's runways. For a successful landing you must touch down inside the perimeter of the runway, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees.
 
-The flight control system has a "landing mode", enabled when the landing gear is extended. When the aircraft is flying with the gears down it will trim itself to an angle of attack of around 13 degrees (normal for an F16 on approach) if you let go of the stick. When in landing mode, use the throttle to adjust the glide path. The stick controls can be used to adjust the angle of attack.
-With the gears down, a throttle setting of around 20% and full air brakes will give you a speed of around 140 knots and a suitable glide path of 3 degrees. You will need to flare before touchdown. Just before touchdown, set the throttle to idle and then apply wheel brakes when you are on the ground.
+The flight control system has a "landing mode", enabled when the landing gear is extended. When in landing mode, the heading indicator (showing compass direction) will move to the top of the HUD, and a vertical bar (approach bracket) will appear below the horizon. On approach, try to place the flight path indicator (the circle with horizontal and vertical lines on it) in the middle of the approach bar.
+
+To start the approach, slow down the aircraft and extend the landing gears below around 250 knots. Also apply full air brakes. Adjust the throttle and the attitude of the plane until you get a speed of between 150 and 170 knots and an angle of attack of 12 to 13 degrees. Then the aircraft will be set up for a correct glide path.
+
+You will need to flare before touchdown. Just before touchdown, set the throttle to idle and then apply wheel brakes when you are on the ground.
 
 ## Screenshots
 
@@ -61,6 +65,8 @@ Features after July 2025 have been made using AI.
 - Improved aircraft rendering (colors, self-shadowing)
 - Fuselage is included in cockpit view rendering
 - You can now turn the head left and right in cockpit view
+- Updates to HUD: font change, simulated glow and landing mode
+- More realistic modeling of near-ground turbulence and steady wind, from zero to 3000 ft
 
 #### September 2026:
 

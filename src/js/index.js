@@ -241,8 +241,15 @@ const EXTERNAL_CAMERA_SLEW_STEP = 4.8
 // y forward, z up, from the centre of gravity) - measured from f16.obj: the
 // top of the pilot figure's head is 0.99 m up, between 5.04 and 5.95 m
 // forward, and the HUD glass in front of it reaches 0.84 m up. The cockpit
-// camera sits here, looking along the aircraft's nose axis.
-const EYE_POSITION = new Vector3(0, 5.25, 0.85)
+// camera sits here, looking along the aircraft's nose axis. The height is
+// set so the view down over the nose, along the top of the glare shield,
+// is the F-16's quoted 15 degrees - from 0.88 m up it is 15.2, and the HUD
+// glass's bottom edge lands just above it (see placeHudAboveAirframe). It
+// is also 11 cm below the top of the pilot figure's head, about where eyes
+// are. A real pilot sets the seat height against a HUD test pattern to put
+// their eyes at the HUD's design eye point, the one place its symbology
+// lines up with the world outside.
+const EYE_POSITION = new Vector3(0, 5.25, 0.88)
 
 // Where the pilot is looking, from the cockpit: degrees of yaw from straight
 // ahead, positive to the left. The look keys set the target, and the view
@@ -319,7 +326,7 @@ const HUD_SIZE = 2 * HUD_DISTANCE * Math.tan(HUD_FIELD_OF_VIEW / 2) // m
 // position and the model, so it is measured from the model once it has
 // loaded (see placeHudAboveAirframe); until then, this. Degrees below the
 // line of sight straight ahead.
-const HUD_BOTTOM_ELEVATION_DEFAULT = -14
+const HUD_BOTTOM_ELEVATION_DEFAULT = -15
 const HUD_CLEARANCE = 0.3 // degrees between the airframe and the glass
 
 const hudPlane = new Mesh(hudGeometry, hudMaterial)
@@ -814,6 +821,7 @@ function drawScene(currentFrametime) {
       f16simulation.atmosphericModel,
       compassOffset,
       f16simulation.landingGearModel.weightOnWheels,
+      gearDown,
     )
     hud.draw()
     hudTexture.needsUpdate = true

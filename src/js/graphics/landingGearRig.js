@@ -326,6 +326,12 @@ export default class LandingGearRig {
   update(gearPosition, noseSteer = 0, strutTravel = null) {
     const doorOpen = doorOpenness(gearPosition)
     const legsVisible = gearPosition > LEG_VISIBLE_ABOVE
+    // closed doors sit against the OBJ fuselage's own skin, so there is
+    // nothing to draw until they start opening. Keyed off doorOpen rather
+    // than gearPosition > 0: the gear actuator's lag only approaches 0
+    // asymptotically after a retraction, never quite reaching it, while
+    // doorOpen is exactly 0 below its smoothstep's lower edge
+    const doorsVisible = doorOpen > 0
 
     for (const leg of this.legs) {
       const { config, doorPivot, doorHingeAxisLocal, strutMeshes, travelMeshes } = leg
@@ -339,6 +345,7 @@ export default class LandingGearRig {
       }
 
       if (doorPivot) {
+        doorPivot.visible = doorsVisible
         // an arbitrary axis (the door's own real hinge-edge direction, not
         // one of the three named world axes - see findHingeEdge) needs
         // quaternion.setFromAxisAngle rather than a plain rotation.x/y/z;

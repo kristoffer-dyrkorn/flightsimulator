@@ -6,6 +6,13 @@ const AIRSPEED_ABOVE_KT = 80
 const AOA_SHOWN_ABOVE_KT = 40
 const FLIGHT_PATH_SHOWN_ABOVE_KT = 10
 
+// landing approach angle of attack bracket, degrees - see drawAoaBracket()
+const APPROACH_AOA_MIN = 11
+const APPROACH_AOA_MAX = 15
+// time constant, seconds, of the low pass filter on the angle of attack
+// that places the bracket - see update()
+const BRACKET_AOA_TAU = 0.5
+
 // how far from the canvas centre, in pixels, pitch ladder lines are still
 // drawn - short of the canvas edge at 400, so the labels fit too
 const LADDER_EXTENT = 370
@@ -22,12 +29,12 @@ export default class HUDObject {
 
     this.ctx = this.canvas.getContext("2d")
     this.ctx.lineWidth = 3
-    this.ctx.shadowBlur = 3
-    this.ctx.shadowColor = "#20ff40c0"
+    this.ctx.shadowBlur = 2
+    this.ctx.shadowColor = "#10ee30c0"
     this.ctx.font = "2.2em Verdana"
     this.ctx.textBaseline = "middle"
-    this.ctx.fillStyle = "#20ff40"
-    this.ctx.strokeStyle = "#20ff40"
+    this.ctx.fillStyle = "#10ee30"
+    this.ctx.strokeStyle = "#10ee30"
 
     // see setGeometry - until it is called, the angle the HUD has always
     // covered, centred on the line of sight
@@ -37,6 +44,11 @@ export default class HUDObject {
     // smoothed for display by averaging over a trailing 1 second window,
     // { time, value } samples, oldest first
     this.sinkRateSamples = []
+
+    // filtered angle of attack for the approach bracket, and when it was
+    // last updated - see update()
+    this.bracketAoa = null
+    this.bracketAoaTime = 0
   }
 
   // trailing 1 second average of the raw sink rate, for a HUD readout that
@@ -59,7 +71,14 @@ export default class HUDObject {
    *                       psi is measured against grid north, so this converts
    *                       it to a true heading.
    */
-  update(airplaneState, airplaneControlInput, atmosphericModel, compassOffset, weightOnWheels = false) {
+  update(
+    airplaneState,
+    airplaneControlInput,
+    atmosphericModel,
+    compassOffset,
+    weightOnWheels = false,
+    gearDown = false,
+  ) {
     this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi + compassOffset)
 
     // wrap into 0..359
@@ -78,10 +97,16 @@ export default class HUDObject {
       : 1
     this.speed = Math.round(groundSpeed + blend * (airspeed - groundSpeed))
 
+    // on approach the flight path marker sits low in the HUD, where the
+    // heading normally is - with the gear down the heading moves to the
+    // top instead, as in the real aircraft's landing mode
+    this.headingAtTop = gearDown
+
     // standing still or taxiing slowly, an angle of attack vane just swings
     // about in whatever wind there is, and the flight path is undefined
     this.showAoa = !weightOnWheels || airspeed >= AOA_SHOWN_ABOVE_KT
     this.showFlightPath = groundSpeed >= FLIGHT_PATH_SHOWN_ABOVE_KT
+    this.showAoaBracket = gearDown && this.showAoa
     this.mach = atmosphericModel.rmach.toFixed(2)
     this.altitude = Math.round(airplaneState.alt)
 
@@ -94,6 +119,21 @@ export default class HUDObject {
     this.roll = airplaneState.phi
     // angle of attack against the air, as the aircraft's vane reads it
     this.aoa = airplaneState.airAlpha
+
+    // the approach bracket is placed by the difference between the angle of
+    // attack and the flight path marker's angle. In gusty air the first
+    // jumps with every gust while the second hardly moves, so unfiltered
+    // the bracket would jump with every gust too - it gets a first order
+    // low pass filtered angle of attack instead, the same smoothing the
+    // real aircraft's air data gives its displays
+    const now = performance.now()
+    if (this.bracketAoa === null) {
+      this.bracketAoa = this.aoa
+    } else {
+      const dt = (now - this.bracketAoaTime) / 1000
+      this.bracketAoa += (this.aoa - this.bracketAoa) * (1 - Math.exp(-dt / BRACKET_AOA_TAU))
+    }
+    this.bracketAoaTime = now
 
     // the flight path marker shows where the aircraft is actually going, so
     // it sits at the angle between the nose and the velocity over the
@@ -246,25 +286,53 @@ export default class HUDObject {
   // velocity (u, v, w) in body axes lands at (v / u, w / u) in tangent
   // units, which in angles is tan(sideslip) / cos(angle of attack) across,
   // and tan(angle of attack) down.
-  drawFlightPathMarker() {
+  flightPathMarkerX() {
     const across = (this.pixelsPerTangent * Math.tan(this.flightPathSideslip)) / Math.cos(this.flightPathAngle)
+    return this.width / 2 + across
+  }
+
+  drawFlightPathMarker() {
     const offset = this.angleToPixels(MathUtils.RAD2DEG * this.flightPathAngle)
-    const x = this.width / 2 + across
+    const x = this.flightPathMarkerX()
 
     this.ctx.beginPath()
-    this.ctx.arc(x, offset + this.boresightY, 10, 0, 2 * Math.PI)
+    this.ctx.arc(x, offset + this.boresightY, 15, 0, 2 * Math.PI)
     this.ctx.stroke()
 
     this.ctx.beginPath()
-    this.ctx.moveTo(x, offset + this.boresightY - 10)
-    this.ctx.lineTo(x, offset + this.boresightY - 22)
+    this.ctx.moveTo(x, offset + this.boresightY - 15)
+    this.ctx.lineTo(x, offset + this.boresightY - 30)
 
-    this.ctx.moveTo(x - 35, offset + this.boresightY)
-    this.ctx.lineTo(x - 10, offset + this.boresightY)
+    this.ctx.moveTo(x - 40, offset + this.boresightY)
+    this.ctx.lineTo(x - 15, offset + this.boresightY)
 
-    this.ctx.moveTo(x + 10, offset + this.boresightY)
-    this.ctx.lineTo(x + 35, offset + this.boresightY)
+    this.ctx.moveTo(x + 15, offset + this.boresightY)
+    this.ctx.lineTo(x + 40, offset + this.boresightY)
 
+    this.ctx.stroke()
+  }
+
+  // With the gear down, a bracket left of the flight path marker shows the
+  // angle of attack to fly on a landing approach. As in the real aircraft
+  // it is placed relative to the marker, not the boresight: the marker
+  // lines up with the top of the bracket at APPROACH_AOA_MIN, with the
+  // bottom at APPROACH_AOA_MAX, and is centred in it halfway between. So
+  // the bracket stays next to the marker wherever that is on the HUD, and
+  // since it is driven by the vane's angle of attack against the air
+  // rather than the marker's angle against the velocity over the ground,
+  // it still reads true in wind. It follows the marker sideways too.
+  drawAoaBracket() {
+    const x = this.flightPathMarkerX() - 50
+    const marker = MathUtils.RAD2DEG * this.flightPathAngle
+    const aoa = MathUtils.RAD2DEG * this.bracketAoa
+    const top = this.boresightY + this.angleToPixels(marker + APPROACH_AOA_MIN - aoa)
+    const bottom = this.boresightY + this.angleToPixels(marker + APPROACH_AOA_MAX - aoa)
+
+    this.ctx.beginPath()
+    this.ctx.moveTo(x + 18, top)
+    this.ctx.lineTo(x, top)
+    this.ctx.lineTo(x, bottom)
+    this.ctx.lineTo(x + 18, bottom)
     this.ctx.stroke()
   }
 
@@ -273,7 +341,7 @@ export default class HUDObject {
 
     const hText = ("" + this.heading).padStart(3, "0")
 
-    this.drawText(hText, "center", 0.5 * this.width, 0.89 * this.height)
+    this.drawText(hText, "center", 0.5 * this.width, (this.headingAtTop ? 0.03 : 0.97) * this.height)
     this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
     this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
 
@@ -293,5 +361,6 @@ export default class HUDObject {
 
     this.drawPitchLadder()
     if (this.showFlightPath) this.drawFlightPathMarker()
+    if (this.showAoaBracket) this.drawAoaBracket()
   }
 }
