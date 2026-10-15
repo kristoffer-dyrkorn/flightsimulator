@@ -28,6 +28,9 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
 import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
+import WindField from "./hifimodel/models/windfield.js"
+import { boundaryLayerFactor } from "./hifimodel/models/windmodel.js"
+import NowcastWind from "./weather/nowcast.js"
 import FlightControlSystem from "./hifimodel/models/flightcontrolsystem.js"
 import RungeKutta4 from "./hifimodel/integrator.js"
 import ActuatorModel from "./hifimodel/models/actuatormodel.js"
@@ -64,16 +67,15 @@ const MAX_PHYSICS_STEPS = 15
 
 // At the surface the forecast is the wind 10 m up. The turbulence model wants
 // the wind at 20 ft, and the two differ by the shape of the boundary layer: the
-// logarithmic profile, over terrain of middling roughness. It works out at about
-// nine tenths of the reported speed.
-const FORECAST_WIND_HEIGHT = 10 // m
-const TURBULENCE_WIND_HEIGHT = 20 * SimulationConstants.FEET_TO_METERS
-const TERRAIN_ROUGHNESS = 0.15 // m, mixed farmland and forest
-
-const SURFACE_WIND_FACTOR =
-  Math.log(TURBULENCE_WIND_HEIGHT / TERRAIN_ROUGHNESS) / Math.log(FORECAST_WIND_HEIGHT / TERRAIN_ROUGHNESS)
+// logarithmic profile the steady wind follows too. It works out at about nine
+// tenths of the reported speed.
+const SURFACE_WIND_FACTOR = boundaryLayerFactor(20)
 
 const KNOTS_PER_FOOT_PER_SECOND = 0.592484
+
+// how often the surface wind under the aircraft is looked up for the turbulence
+// model, and the wind field moved on in time, ms
+const WIND_UPDATE_INTERVAL = 200
 
 let physicsTimeDebt = 0
 
@@ -356,8 +358,10 @@ startDirection -= startPoint[3]
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 
-// set up physics simulation
-const f16simulation = new F16Simulation()
+// set up physics simulation, flying in a surface wind read from the forecast at
+// the corners of the terrain tiles
+const windField = new WindField(TILE_EXTENTS, MINX, MINY)
+const f16simulation = new F16Simulation(windField)
 const airplaneState = new StateVector()
 airplaneState.init(startPoint, startDirection)
 
@@ -367,36 +371,49 @@ airplaneState.init(startPoint, startDirection)
 heightAboveGround = startPoint[2]
 
 // Fly in the real weather: ask MET what the wind is doing over the start point,
-// and hand it to the turbulence model - the surface wind sets the roughness down
-// low - and to the steady wind the aircraft is carried along by. The nowcast
-// only has the wind near the ground: its altitude parameter is the height of
-// the location, used to correct the temperature, and the wind comes back the
-// same whatever it is set to. So one request, and the wind is the same at all
-// heights. Deliberately not awaited: the simulation starts on the default
-// weather and picks the real one up a moment later, and carries on with the
-// default if the service cannot be reached.
-downloadWindData(startPoint[4]).then((surface) => {
-  if (!surface) return
+// and then, a corner at a time and a few seconds apart, at the corners of the
+// terrain tiles around the aircraft - see nowcast.js. The forecast only has the
+// wind near the ground, so that is the surface wind, and the wind model works
+// out the wind higher up from it. Deliberately not awaited: the simulation
+// starts on the default weather and picks the real one up a moment later, and
+// carries on with the default if the service cannot be reached.
+const nowcastWind = new NowcastWind(
+  windField,
+  (x, y) => proj4(UTM33N_PROJECTION).inverse([x, y]),
+  () => [
+    airplaneState.epos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.npos * SimulationConstants.FEET_TO_METERS,
+  ],
+)
 
-  const profile = [surface]
+nowcastWind.start(startPoint[0], startPoint[1]).then((wind) => {
+  if (!wind) return
 
-  // the lowest level is the surface wind, and the surface wind is the one the
-  // boundary layer profile applies to
-  f16simulation.turbulenceModel.setWind(profile[0].speed * SURFACE_WIND_FACTOR, profile)
-
-  // the same profile is the steady wind the aircraft is carried along by
-  f16simulation.windModel.setWind(profile)
-
-  for (const level of profile) {
-    console.log(
-      "Wind at %d ft: %d knots from %d degrees, gusting %d",
-      Math.round(level.altitude),
-      Math.round(level.speed * KNOTS_PER_FOOT_PER_SECOND),
-      Math.round(level.direction),
-      Math.round(level.gust * KNOTS_PER_FOOT_PER_SECOND),
-    )
-  }
+  console.log(
+    "Surface wind: %d knots from %d degrees, gusting %d",
+    Math.round(wind.speed * KNOTS_PER_FOOT_PER_SECOND),
+    Math.round(wind.direction),
+    Math.round(wind.gust * KNOTS_PER_FOOT_PER_SECOND),
+  )
 })
+
+// The surface wind changes as the aircraft moves, and as more of it is read, so
+// the turbulence down low is kept following the wind under the aircraft. Five
+// times a second is plenty: across a tile the wind changes over kilometres.
+setInterval(() => {
+  if (paused || !windField.ready) return
+
+  const x = airplaneState.epos * SimulationConstants.FEET_TO_METERS
+  const y = airplaneState.npos * SimulationConstants.FEET_TO_METERS
+
+  windField.update(x, y, WIND_UPDATE_INTERVAL * 0.001)
+
+  const surface = windField.surfaceWind(x, y)
+  f16simulation.turbulenceModel.setSurfaceWind(
+    Math.hypot(surface.east, surface.north) * SURFACE_WIND_FACTOR,
+    surface.gustSpread,
+  )
+}, WIND_UPDATE_INTERVAL)
 
 // keep two physics states in the physics loop, to allow for interpolation
 const previousAirplaneState = new StateVector()
@@ -911,53 +928,6 @@ function getCompassOffset(east, north) {
   const lonDelta = lonlat[0] - UTM33N_CENTRAL_MERIDIAN
 
   return Math.atan(Math.tan(lonDelta * MathUtils.DEG2RAD) * Math.sin(lonlat[1] * MathUtils.DEG2RAD)) * MathUtils.RAD2DEG
-}
-
-async function downloadWindData(lonlat) {
-  // https://api.met.no/doc/
-
-  const weatherAPI = "https://api.met.no/weatherapi/nowcast/2.0/complete"
-  const weatherURL = `${weatherAPI}?lat=${lonlat[1].toFixed(3)}&lon=${lonlat[0].toFixed(3)}`
-
-  try {
-    const weatherResponse = await fetch(`${weatherURL}`, {
-      method: "GET",
-      headers: {
-        "User-Agent": "https://github.com/kristoffer-dyrkorn/flightsimulator - dyrkorn@gmail.com",
-      },
-    })
-
-    if (!weatherResponse.ok) {
-      throw new Error(`the weather service answered ${weatherResponse.status}`)
-    }
-
-    const weatherData = await weatherResponse.json()
-
-    // only the first entry of the series carries the wind - the ones after it are
-    // the precipitation forecast, and have nothing else in them
-    const { wind_from_direction, wind_speed, wind_speed_of_gust } =
-      weatherData.properties.timeseries[0].data.instant.details
-
-    // speeds are reported in m/s and the flight model works in ft/s
-    const speed = wind_speed * SimulationConstants.METERS_TO_FEET
-    const gust = (wind_speed_of_gust ?? wind_speed) * SimulationConstants.METERS_TO_FEET
-
-    // a wind direction is the direction the wind comes from, so the direction it
-    // blows towards - which is what a velocity needs - is the opposite one
-    const heading = (wind_from_direction + 180) * MathUtils.DEG2RAD
-
-    return {
-      altitude: 0, // the surface wind
-      east: speed * Math.sin(heading),
-      north: speed * Math.cos(heading),
-      speed,
-      gust,
-      direction: wind_from_direction,
-    }
-  } catch (error) {
-    console.log("Could not read wind data: %s", error.message)
-    return null
-  }
 }
 
 async function getStartpointFromParameters(urlParams) {

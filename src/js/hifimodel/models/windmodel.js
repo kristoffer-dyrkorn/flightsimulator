@@ -1,3 +1,5 @@
+import SimulationConstants from "../simulationconstants.js"
+
 /**
  * Steady wind.
  *
@@ -16,63 +18,72 @@
  * the position is integrated from the velocity over the ground, and the wind is
  * simply the difference between the two.
  *
- * What the wind is doing comes from the same forecast profile the turbulence
- * intensity does, so the wind changes with altitude - which is the other half of
- * why it matters. Climbing through a layer where the wind changes puts the
- * aircraft into air moving at a different speed than the air it just left, and
- * for the moment before it settles, that lands entirely on the airspeed. That is
- * wind shear, and it falls out of this for free: no special case, just the same
- * profile read at a different height.
+ * What the wind is doing comes from the forecast for the surface, read at the
+ * corners of the terrain tiles around the aircraft (see windfield.js), so it
+ * changes from place to place. It also changes with height, because the ground
+ * holds the air back: right at the surface the wind is nothing, and it picks up
+ * logarithmically away from it, quickly at first and then more and more slowly.
+ * The forecast is the wind at 10 m, so on the ground roll the wind across the
+ * wing is a good deal less than the forecast says, and a few hundred feet up it
+ * is a good deal more.
+ *
+ * That is wind shear, and it falls out of this for free: descending through it
+ * on an approach takes away airspeed the aircraft had a moment ago, because the
+ * headwind it was flying into is dying away underneath it. No special case,
+ * just the same profile read at a different height.
+ *
+ * Higher up, the sample at a corner says less and less about the air the
+ * aircraft is in. The forecast for the bottom of a sheltered fjord is calm, and
+ * the air a few thousand feet above it is not, so away from the ground the wind
+ * blends from the local one to the regional one, the average of the samples
+ * around the aircraft. Above that there is no forecast, and the wind is held at
+ * what it is at the top of the boundary layer.
  *
  * Only the horizontal wind is modelled. The forecast has nothing to say about
  * vertical motion of the air, and away from thunderstorms and mountain waves
  * there is not much of it to say anything about.
  */
 
-function interpolate(breakpoints, table, value) {
-  if (value <= breakpoints[0]) return table[0]
-  if (value >= breakpoints[breakpoints.length - 1]) return table[table.length - 1]
+/* The logarithmic profile, over terrain of middling roughness - mixed farmland
+   and forest. It holds through the lowest hundred metres or so, the surface
+   layer, and the wind is held at the value it reaches there above that. Below
+   about a metre the profile is meaningless: the air is being held back by
+   individual trees and buildings rather than by the terrain as a whole. */
+const FORECAST_HEIGHT = 10 * SimulationConstants.METERS_TO_FEET
+const ROUGHNESS = 0.15 * SimulationConstants.METERS_TO_FEET
+const SURFACE_LAYER_TOP = 100 * SimulationConstants.METERS_TO_FEET
+const LOWEST_HEIGHT = 1 * SimulationConstants.METERS_TO_FEET
 
-  let i = 1
-  while (breakpoints[i] < value) i++
+/* Height above ground at which the wind starts to blend from the local wind to
+   the regional one, and the height it is regional at, ft */
+const LOCAL_TOP = 1000
+const REGIONAL_BOTTOM = 3000
 
-  const span = (value - breakpoints[i - 1]) / (breakpoints[i] - breakpoints[i - 1])
-  return table[i - 1] + span * (table[i] - table[i - 1])
+/**
+ * The wind at a height above the ground, as a multiple of the forecast wind at
+ * 10 m.
+ *
+ * @param height  height above the ground, ft
+ */
+export function boundaryLayerFactor(height) {
+  const h = Math.min(Math.max(height, LOWEST_HEIGHT), SURFACE_LAYER_TOP)
+  return Math.log(h / ROUGHNESS) / Math.log(FORECAST_HEIGHT / ROUGHNESS)
 }
 
 export default class WindModel {
-  constructor() {
+  /**
+   * @param field  the surface wind to read from - see windfield.js. Without one
+   *               the air is still.
+   */
+  constructor(field = null) {
     this.enabled = true
+
+    this.field = field
 
     /* wind velocity in earth axes, ft/s - the direction the air is moving
        towards, not the direction it comes from */
     this.east = 0
     this.north = 0
-
-    /* the profile it is read from: wind against altitude, ft */
-    this.profileAltitude = []
-    this.profileEast = []
-    this.profileNorth = []
-  }
-
-  /**
-   * Sets the wind profile.
-   *
-   * @param profile  the wind at altitude, from the ground up: for each level an
-   *                 altitude in ft above sea level and the wind there resolved
-   *                 into east and north components, ft/s. Held flat below the
-   *                 lowest level and above the highest.
-   */
-  setWind(profile = []) {
-    this.profileAltitude.length = 0
-    this.profileEast.length = 0
-    this.profileNorth.length = 0
-
-    for (const level of profile) {
-      this.profileAltitude.push(level.altitude)
-      this.profileEast.push(level.east)
-      this.profileNorth.push(level.north)
-    }
   }
 
   /**
@@ -89,24 +100,39 @@ export default class WindModel {
   }
 
   /**
-   * Reads the wind at an altitude.
+   * Reads the wind at a position.
    *
    * Unlike the turbulence this is evaluated at every stage of an integration
    * step rather than once per step, and correctly so: it is not a process
    * running in time that has to be held still to be integrated against, it is a
-   * fixed field the aircraft is moving through. Asking it where the aircraft is
-   * now is always the right question.
+   * field the aircraft is moving through. Asking it where the aircraft is now is
+   * always the right question.
    *
-   * @param altitude  altitude above sea level, ft
+   * @param east, north  position, ft
+   * @param altitude     altitude above sea level, ft
+   * @param groundAlt    elevation of the terrain below, ft - far below the
+   *                     aircraft while it is not yet known, which reads as
+   *                     being high above the ground
    */
-  update(altitude) {
-    if (!this.enabled || this.profileAltitude.length === 0) {
+  update(east, north, altitude, groundAlt) {
+    if (!this.enabled || !this.field?.ready) {
       this.east = 0
       this.north = 0
       return
     }
 
-    this.east = interpolate(this.profileAltitude, this.profileEast, altitude)
-    this.north = interpolate(this.profileAltitude, this.profileNorth, altitude)
+    const height = altitude - groundAlt
+
+    const local = this.field.surfaceWind(
+      east * SimulationConstants.FEET_TO_METERS,
+      north * SimulationConstants.FEET_TO_METERS,
+    )
+    const regional = this.field.regional
+
+    const blend = Math.min(Math.max((height - LOCAL_TOP) / (REGIONAL_BOTTOM - LOCAL_TOP), 0), 1)
+    const factor = boundaryLayerFactor(height)
+
+    this.east = factor * (local.east + blend * (regional.east - local.east))
+    this.north = factor * (local.north + blend * (regional.north - local.north))
   }
 }

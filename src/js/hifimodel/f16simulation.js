@@ -22,12 +22,15 @@ import {
 } from "./models/aerodynamicFunctions.js"
 
 export default class F16Simulation {
-  constructor() {
+  /**
+   * @param windField  the surface wind the aircraft flies in - see windfield.js
+   */
+  constructor(windField = null) {
     this.atmosphericModel = new AtmosphericModel()
     this.engineModel = new EngineModel()
     this.compressibilityModel = new CompressibilityModel()
     this.turbulenceModel = new TurbulenceModel()
-    this.windModel = new WindModel()
+    this.windModel = new WindModel(windField)
     this.landingGearModel = new LandingGearModel()
   }
 
@@ -106,8 +109,10 @@ export default class F16Simulation {
        The steady wind arrives in earth axes and has to be turned into body axes
        to be subtracted, which is the body to earth matrix used backwards - its
        transpose, hence the columns being read down instead of along. The wind
-       has no vertical component, so the "down" column of it drops out. */
-    this.windModel.update(alt)
+       has no vertical component, so the "down" column of it drops out. It
+       depends on the height above the ground as well as on where the aircraft
+       is, and the ground elevation is the one the landing gear works from. */
+    this.windModel.update(epos, npos, alt, this.landingGearModel.groundAlt)
 
     const windNorth = this.windModel.north
     const windEast = this.windModel.east

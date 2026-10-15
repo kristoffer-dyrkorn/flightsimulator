@@ -73,11 +73,11 @@ import SimulationConstants from "../simulationconstants.js"
  *
  * How windy it is, then, is the one thing this model does not decide for itself.
  * It is handed the weather from outside, by whoever knows what it is doing -
- * which in this simulator is the real forecast for the place the flight starts,
- * read at several heights. The surface wind sets the roughness down low, and
- * what the wind does with height sets the turbulence aloft: air that is moving
- * at one speed at 3000 ft and another at 10000 ft has to shear somewhere in
- * between, and that shearing is what tears smooth flow into turbulence. It is
+ * which in this simulator is the real forecast. The surface wind under the
+ * aircraft, and how gusty it is, sets the roughness down low, and what the wind
+ * does with height, where that is known, sets the turbulence aloft: air that is
+ * moving at one speed at 3000 ft and another at 10000 ft has to shear somewhere
+ * in between, and that shearing is what tears smooth flow into turbulence. It is
  * the reason clear air turbulence is forecast from wind fields at all, and ten
  * knots of change per thousand feet is the long standing criterion for expecting
  * a moderate amount of it.
@@ -113,6 +113,11 @@ const MODERATE_SHEAR = 16.878 / 1000
    from the mean wind. */
 const MODERATE_GUST = 10.0
 const GUST_PEAK_FACTOR = 3
+
+/* The specification's shape factor for the low altitude gust magnitudes, at the
+   20 ft the surface wind is given for. The ratio of the horizontal to the
+   vertical RMS gust there is one over this to the 0.4. */
+const SURFACE_SHAPE = 0.177 + 0.000823 * 20
 
 /* Weather to fly in until the forecast arrives, or if it never does: a fifteen
    knot surface wind and light turbulence aloft, which is a quiet but not a dead
@@ -323,6 +328,7 @@ export default class TurbulenceModel {
 
     /* the weather, until someone says otherwise */
     this.windAt20Ft = DEFAULT_WIND_AT_20_FT /* ft/s */
+    this.surfaceSigma = 0.1 * DEFAULT_WIND_AT_20_FT /* vertical RMS gust down low, ft/s */
     this.intensity = DEFAULT_INTENSITY /* multiple of moderate turbulence */
 
     /* Turbulence aloft as read off a wind profile: a multiple of moderate
@@ -416,7 +422,7 @@ export default class TurbulenceModel {
     const low = Math.min(h, LOW_ALTITUDE_TOP)
     const shape = 0.177 + 0.000823 * low
 
-    const lowVerticalSigma = 0.1 * this.windAt20Ft
+    const lowVerticalSigma = this.surfaceSigma
     const lowHorizontalSigma = lowVerticalSigma / Math.pow(shape, 0.4)
     const lowVerticalScale = low
     const lowHorizontalScale = low / Math.pow(shape, 1.2)
@@ -493,19 +499,42 @@ export default class TurbulenceModel {
   }
 
   /**
-   * Sets the weather.
+   * Sets the weather down low, which is what sets how rough it is below
+   * 1000 ft. Cheap, and meant to be called again as the aircraft moves and the
+   * surface wind under it changes.
    *
-   * @param windAt20Ft  wind speed at 20 ft above the ground, ft/s. Sets how
-   *                    rough it is below 1000 ft, and nothing else.
-   * @param profile     the wind at altitude, from the ground up: for each level
-   *                    an altitude in ft above sea level, the wind resolved into
-   *                    east and north components in ft/s, and the gust speed
-   *                    there in ft/s. Two levels or more give the turbulence
-   *                    aloft; with fewer, the flat default is kept.
+   * Two ways of reading it, and as aloft the rougher of the two wins. The
+   * specification goes by the wind speed alone: a tenth of it is the vertical
+   * RMS gust, whatever the day is like. The forecast gust says what the day is
+   * actually like - a gust standing well above the mean wind is a gusty day, and
+   * one that barely stands above it a steady one. The gap between them is a
+   * peak in the horizontal gust, three standard deviations out, and the
+   * specification's own ratio of horizontal to vertical turns that into the
+   * vertical RMS gust the rest of the model is driven from.
+   *
+   * @param windAt20Ft  wind speed at 20 ft above the ground, ft/s
+   * @param gustSpread  how far the forecast gust stands above the mean wind,
+   *                    ft/s. The spread changes little through the lowest tens
+   *                    of metres, so the one forecast at 10 m will do for 20 ft.
    */
-  setWind(windAt20Ft, profile = []) {
+  setSurfaceWind(windAt20Ft, gustSpread = 0) {
     this.windAt20Ft = Math.max(windAt20Ft, 0)
 
+    const forecastSigma = (Math.max(gustSpread, 0) / GUST_PEAK_FACTOR) * Math.pow(SURFACE_SHAPE, 0.4)
+
+    this.surfaceSigma = Math.max(0.1 * this.windAt20Ft, forecastSigma)
+  }
+
+  /**
+   * Sets the weather aloft, which is what sets how rough it is above 2000 ft.
+   *
+   * @param profile  the wind at altitude, from the ground up: for each level an
+   *                 altitude in ft above sea level, the wind resolved into east
+   *                 and north components in ft/s, and the gust speed there in
+   *                 ft/s. Two levels or more give the turbulence aloft; with
+   *                 fewer, the flat default is kept.
+   */
+  setProfile(profile = []) {
     this.profileAltitude.length = 0
     this.profileIntensity.length = 0
 
