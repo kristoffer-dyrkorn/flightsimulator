@@ -157,7 +157,19 @@ export default class HUDObject {
 
   drawText(text, align, x, y) {
     this.ctx.textAlign = align
-    this.ctx.fillText(text, x, y)
+
+    // centred on the glyphs' own measured extent rather than the "middle"
+    // baseline, which browsers place differently - Safari draws it a few
+    // pixels lower than Chrome and Firefox do, so the text sat low in its
+    // box there. The box below is centred 2 pixels above y. Measured on a
+    // digit, not the text itself: the altitude's thousands separator
+    // reaches below the digits, and would lift them higher in their box
+    // than the speed's digits sit in theirs.
+    this.ctx.textBaseline = "alphabetic"
+    const glyphs = this.ctx.measureText("0")
+    const baseline = y - 2 + (glyphs.actualBoundingBoxAscent - glyphs.actualBoundingBoxDescent) / 2
+    this.ctx.fillText(text, x, baseline)
+    this.ctx.textBaseline = "middle"
 
     const box = this.getTextBoundingBox(text)
 
@@ -242,8 +254,13 @@ export default class HUDObject {
           this.ctx.lineTo(50, offset)
           this.ctx.lineTo(150, offset)
 
-          this.ctx.fillText(deg, -165, offset + 20)
-          this.ctx.fillText(deg, 145, offset + 20)
+          if (deg >= 10) {
+            this.ctx.fillText(deg, -180, offset + 25)
+            this.ctx.fillText(deg, 135, offset + 25)
+          } else {
+            this.ctx.fillText(deg, -165, offset + 25)
+            this.ctx.fillText(deg, 140, offset + 25)
+          }
         }
       }
     }
@@ -268,8 +285,13 @@ export default class HUDObject {
         this.ctx.lineTo(50, offset)
         this.ctx.lineTo(150, offset)
 
-        this.ctx.fillText(-deg, -165, offset + 20)
-        this.ctx.fillText(-deg, 145, offset + 20)
+        if (deg <= -10) {
+          this.ctx.fillText(-deg, -180, offset + 25)
+          this.ctx.fillText(-deg, 135, offset + 25)
+        } else {
+          this.ctx.fillText(-deg, -165, offset + 25)
+          this.ctx.fillText(-deg, 140, offset + 25)
+        }
       }
     }
     this.ctx.stroke()
