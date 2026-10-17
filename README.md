@@ -66,9 +66,9 @@ Features after July 2025 have been made using AI.
 - Improved aircraft rendering (colors, self-shadowing)
 - Fuselage is included in cockpit view rendering
 - You can now turn the head left and right in cockpit view
-- Updates to HUD: font change, simulated glow and landing mode
+- Updates to HUD: font change, simulated glow, landing mode, scales
 - More realistic modeling of near-ground turbulence and steady wind, from zero to 3000 ft
-- Sky and landscape rendering adapting to sun position and time of day, with atmospheric scattering
+- Sky and landscape rendering adjusting to the time of day, with atmospheric scattering
 
 #### September 2026:
 

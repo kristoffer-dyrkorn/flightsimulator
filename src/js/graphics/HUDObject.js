@@ -13,15 +13,61 @@ const APPROACH_AOA_MAX = 15
 // that places the bracket - see update()
 const BRACKET_AOA_TAU = 0.5
 
+// the speed shown jitters with every bit of turbulence, and its number with
+// it - see update. Time constant of its low pass filter, seconds, and how
+// far, knots, it has to move from the number shown before that changes.
+const SPEED_TAU = 0.5
+const SPEED_HYSTERESIS = 0.75
+
 // how far from the canvas centre, in pixels, pitch ladder lines are still
 // drawn - short of the canvas edge at 400, so the labels fit too
 const LADDER_EXTENT = 370
+
+// how far out from the centre the speed and altitude boxes point, pixels -
+// beyond the horizon line's ends, at 350
+const SIDE_LABEL_OFFSET = 380
+
+// how far the readouts down the left side start from the centre, pixels
+const LEFT_COLUMN = 385
+
+// The moving scales (VAH, in the real aircraft's terms) behind the speed,
+// altitude and heading boxes: pixels per knot, foot and degree, how far
+// each reaches either side of its box, pixels, and their labels' font
+const SPEED_SCALE = 2
+const ALTITUDE_SCALE = 0.2
+const HEADING_SCALE = 10
+const SCALE_REACH = 150
+const SCALE_FONT = "1.5em Verdana"
+
+// calibrated airspeed, from the static pressure and Mach number - see
+// calibratedAirspeed
+const SEA_LEVEL_PRESSURE = 2116.22 // lb/ft^2
+const SEA_LEVEL_SOUND_SPEED = 661.47 // knots
+
+// The airspeed an airspeed indicator shows - calibrated airspeed, knots -
+// from the static pressure, lb/ft^2, and the Mach number. The indicator
+// measures the impact pressure (the pitot's pressure less the static) and
+// reads it as the speed that would give that pressure at sea level, so it
+// reads less than the true speed through the air the higher the aircraft
+// flies - some 7% less at 5000 ft. Above Mach 1 the pitot sits behind a
+// shock wave, which the impact pressure is worked out through.
+function calibratedAirspeed(staticPressure, mach) {
+  const impactRatio =
+    mach < 1
+      ? (1 + 0.2 * mach * mach) ** 3.5 - 1
+      : (166.92158 * mach ** 7) / (7 * mach * mach - 1) ** 2.5 - 1
+  const impactPressure = staticPressure * impactRatio
+  return SEA_LEVEL_SOUND_SPEED * Math.sqrt(5 * ((impactPressure / SEA_LEVEL_PRESSURE + 1) ** (2 / 7) - 1))
+}
 
 export default class HUDObject {
   constructor(canvas) {
     this.canvas = canvas
 
-    this.width = 800
+    // wider than it is tall, for the speed and altitude boxes either side,
+    // well out from the centre - see SIDE_LABEL_OFFSET. The panel it is drawn
+    // on has the same shape (see index.js).
+    this.width = 1080
     this.height = 800
 
     this.canvas.width = this.width
@@ -49,6 +95,11 @@ export default class HUDObject {
     // last updated - see update()
     this.bracketAoa = null
     this.bracketAoaTime = 0
+
+    // the filtered speed, and when it was last updated - see update
+    this.speedExact = null
+    this.speedTime = 0
+    this.speed = 0
   }
 
   // trailing 1 second average of the raw sink rate, for a HUD readout that
@@ -79,23 +130,45 @@ export default class HUDObject {
     weightOnWheels = false,
     gearDown = false,
   ) {
-    this.heading = Math.round(MathUtils.RAD2DEG * airplaneState.psi + compassOffset)
+    // the heading as it is, for the heading scale to move smoothly with, and
+    // to the whole degree, for the number in its box
+    this.headingExact = MathUtils.RAD2DEG * airplaneState.psi + compassOffset
+    this.headingExact = ((this.headingExact % 360) + 360) % 360
+    this.heading = Math.round(this.headingExact)
 
     // wrap into 0..359
     this.heading = ((this.heading % 360) + 360) % 360
 
     // airspeed, as an airspeed indicator reads: what the aircraft is doing
-    // through the air, not over the ground. On the ground at taxi speeds
-    // that is mostly the wind, so there it shows ground speed instead -
-    // blended over to airspeed between GROUND_SPEED_BELOW_KT and
-    // AIRSPEED_ABOVE_KT, so it never jumps by the wind speed on a take off
-    // roll, and reads zero when the aircraft is standing still
+    // through the air, not over the ground - calibrated airspeed, see
+    // calibratedAirspeed. On the ground at taxi speeds that is mostly the
+    // wind, so there it shows ground speed instead - blended over to
+    // airspeed between GROUND_SPEED_BELOW_KT and AIRSPEED_ABOVE_KT, so it
+    // never jumps by the wind speed on a take off roll, and reads zero when
+    // the aircraft is standing still. The letter by it says which it is, as
+    // in the real aircraft: C for calibrated, G for ground speed.
     const airspeed = 0.592484 * airplaneState.airspeed
+    const calibrated = calibratedAirspeed(atmosphericModel.ps, atmosphericModel.rmach)
     const groundSpeed = 0.592484 * airplaneState.vt
     const blend = weightOnWheels
       ? MathUtils.clamp((groundSpeed - GROUND_SPEED_BELOW_KT) / (AIRSPEED_ABOVE_KT - GROUND_SPEED_BELOW_KT), 0, 1)
       : 1
-    this.speed = Math.round(groundSpeed + blend * (airspeed - groundSpeed))
+    // Smoothed, for the speed scale to move with: turbulence jiggles the
+    // airspeed by fractions of a knot all the time. The number in the speed
+    // box is that to the whole knot - changed only once the speed has
+    // moved SPEED_HYSTERESIS from it, so that a speed sitting near a half
+    // knot doesn't make it flicker between two values.
+    const speed = groundSpeed + blend * (calibrated - groundSpeed)
+    const now = performance.now()
+    if (this.speedExact === null) {
+      this.speedExact = speed
+    } else {
+      const dt = (now - this.speedTime) / 1000
+      this.speedExact += (speed - this.speedExact) * (1 - Math.exp(-dt / SPEED_TAU))
+    }
+    this.speedTime = now
+    if (Math.abs(this.speedExact - this.speed) >= SPEED_HYSTERESIS) this.speed = Math.round(this.speedExact)
+    this.speedKind = blend < 0.5 ? "G" : "C"
 
     // on approach the flight path marker sits low in the HUD, where the
     // heading normally is - with the gear down the heading moves to the
@@ -108,9 +181,9 @@ export default class HUDObject {
     this.showFlightPath = groundSpeed >= FLIGHT_PATH_SHOWN_ABOVE_KT
     this.showAoaBracket = gearDown && this.showAoa
     this.mach = atmosphericModel.rmach.toFixed(2)
-    this.altitude = Math.round(airplaneState.alt)
+    this.altitudeFeet = Math.round(airplaneState.alt)
 
-    this.altitude = this.altitude.toLocaleString(undefined, {
+    this.altitude = this.altitudeFeet.toLocaleString(undefined, {
       maximumFractionDigits: 0,
     })
 
@@ -126,7 +199,6 @@ export default class HUDObject {
     // the bracket would jump with every gust too - it gets a first order
     // low pass filtered angle of attack instead, the same smoothing the
     // real aircraft's air data gives its displays
-    const now = performance.now()
     if (this.bracketAoa === null) {
       this.bracketAoa = this.aoa
     } else {
@@ -155,7 +227,9 @@ export default class HUDObject {
     return [textMetrics.width + 5, textMetrics.fontBoundingBoxAscent + textMetrics.fontBoundingBoxDescent]
   }
 
-  drawText(text, align, x, y) {
+  // a boxed label: the text, aligned at x, and a box round it - big enough
+  // for boxText, which defaults to the text itself
+  drawText(text, align, x, y, boxText = text) {
     this.ctx.textAlign = align
 
     // centred on the glyphs' own measured extent rather than the "middle"
@@ -171,7 +245,7 @@ export default class HUDObject {
     this.ctx.fillText(text, x, baseline)
     this.ctx.textBaseline = "middle"
 
-    const box = this.getTextBoundingBox(text)
+    const box = this.getTextBoundingBox(boxText)
 
     this.ctx.beginPath()
 
@@ -358,28 +432,143 @@ export default class HUDObject {
     this.ctx.stroke()
   }
 
+  // A moving scale, up the HUD's side: ticks every step, longer and labelled
+  // every major step, moving past the box's pointer at x, y as the value
+  // changes. side is -1 with the ticks to the left of x and the labels to
+  // its right, 1 the other way round. Labels next to the box are left out,
+  // as it covers the value there.
+  drawVerticalScale(x, y, value, pixelsPer, step, major, side, label) {
+    const ctx = this.ctx
+    const boxHalfHeight = this.getTextBoundingBox("0")[1] / 2
+    const reach = SCALE_REACH / pixelsPer
+
+    ctx.save()
+    ctx.font = SCALE_FONT
+    ctx.textAlign = side < 0 ? "left" : "right"
+    ctx.beginPath()
+
+    for (let v = Math.ceil((value - reach) / step) * step; v <= value + reach; v += step) {
+      if (v < 0) continue
+      const tickY = y - (v - value) * pixelsPer
+      const isMajor = v % major === 0
+      ctx.moveTo(x + side * 2, tickY)
+      ctx.lineTo(x + side * (isMajor ? 20 : 12), tickY)
+      if (isMajor && Math.abs(tickY - y) > boxHalfHeight + 14) ctx.fillText(label(v), x - side * 8, tickY)
+    }
+
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // speed, every 10 knots, labelled every 50 in tens of knots, as in the
+  // real aircraft ("45" for 450) - its ticks on the inside of the speed
+  // box's pointer, the labels above and below the box
+  drawSpeedScale() {
+    const x = this.width / 2 - SIDE_LABEL_OFFSET
+    this.drawVerticalScale(x, 0.5 * this.height, this.speedExact, SPEED_SCALE, 10, 50, 1, (knots) => String(knots / 10))
+  }
+
+  // altitude, every 100 ft, labelled every 500 in thousands of feet to one
+  // decimal, as in the real aircraft ("16,5" for 16,500) - mirroring the
+  // speed's, with an index line reaching in from it at the box, as the
+  // speed's notch under the C does
+  drawAltitudeScale() {
+    const x = this.width / 2 + SIDE_LABEL_OFFSET
+    const y = 0.5 * this.height
+    const label = (feet) => `${Math.floor(feet / 1000)},${(feet % 1000) / 100}`
+    this.drawVerticalScale(x, y, this.altitudeFeet, ALTITUDE_SCALE, 100, 500, -1, label)
+
+    this.ctx.beginPath()
+    this.ctx.moveTo(x - 2, y)
+    this.ctx.lineTo(x - 34, y)
+    this.ctx.stroke()
+  }
+
+  // heading, every 5 degrees, labelled every 10 in tens of degrees, as a
+  // compass card is - on the side of the heading box towards the HUD's
+  // centre, wherever the box is (see headingAtTop)
+  drawHeadingScale(boxY) {
+    const ctx = this.ctx
+    const centre = this.width / 2
+    const inwards = this.headingAtTop ? 1 : -1
+    const edge = boxY + inwards * (this.getTextBoundingBox("0")[1] / 2 + 4)
+    const reach = SCALE_REACH / HEADING_SCALE
+
+    ctx.save()
+    ctx.font = SCALE_FONT
+    ctx.textAlign = "center"
+    ctx.beginPath()
+
+    for (let d = Math.ceil((this.headingExact - reach) / 5) * 5; d <= this.headingExact + reach; d += 5) {
+      const x = centre + (d - this.headingExact) * HEADING_SCALE
+      const isMajor = d % 10 === 0
+      ctx.moveTo(x, edge)
+      ctx.lineTo(x, edge + inwards * (isMajor ? 18 : 10))
+      if (isMajor) {
+        const heading = (((d % 360) + 360) % 360) / 10
+        ctx.fillText(String(heading).padStart(2, "0"), x, edge + inwards * 34)
+      }
+    }
+
+    ctx.stroke()
+    ctx.restore()
+  }
+
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height)
 
     const hText = ("" + this.heading).padStart(3, "0")
 
-    this.drawText(hText, "center", 0.5 * this.width, (this.headingAtTop ? 0.03 : 0.97) * this.height)
-    this.drawText(this.speed, "right", 0.1 * this.width, 0.5 * this.height)
-    this.drawText(this.altitude, "left", 0.85 * this.width, 0.5 * this.height)
+    const headingY = (this.headingAtTop ? 0.03 : 0.97) * this.height
+    this.drawText(hText, "center", 0.5 * this.width, headingY)
+    this.drawHeadingScale(headingY)
+    // the speed's box with room for one more character left of its first
+    // digit, and the altitude's for five digits, whatever the altitude -
+    // with the thousands separator the browser's own number format uses
+    const centre = this.width / 2
+    const speed = String(this.speed)
+    this.drawText(speed, "right", centre - SIDE_LABEL_OFFSET - 12, 0.5 * this.height, "0" + speed)
+    const longest = (88888).toLocaleString(undefined, { maximumFractionDigits: 0 })
+    const altitudeBox = this.altitude.length > longest.length ? this.altitude : longest
+    this.drawText(this.altitude, "left", centre + SIDE_LABEL_OFFSET + 12, 0.5 * this.height, altitudeBox)
+
+    // C or G (see update), as in the real aircraft: on the inside of the
+    // speed scale, level with the box, standing on a short notch line that
+    // reaches in from the scale and points out the speed on it. Placed by
+    // its own measured height, not the "middle" baseline, which Safari
+    // places lower than other browsers do - see drawText.
+    const pointer = centre - SIDE_LABEL_OFFSET
+    const speedY = 0.5 * this.height
+    this.ctx.beginPath()
+    this.ctx.moveTo(pointer + 2, speedY)
+    this.ctx.lineTo(pointer + 46, speedY)
+    this.ctx.stroke()
+    this.ctx.save()
+    this.ctx.font = "2em Verdana"
+    this.ctx.textAlign = "center"
+    this.ctx.textBaseline = "alphabetic"
+    const letter = this.ctx.measureText(this.speedKind)
+    this.ctx.fillText(this.speedKind, pointer + 32, speedY - 5 - letter.actualBoundingBoxDescent)
+    this.ctx.restore()
+
+    this.drawSpeedScale()
+    this.drawAltitudeScale()
 
     const aoaText = this.showAoa ? Math.round(this.aoa * MathUtils.RAD2DEG) : "--"
 
-    this.ctx.fillText(`AOA ${aoaText}`, 15, 0.8 * this.height)
-    this.ctx.fillText(`M ${this.mach}`, 15, 0.85 * this.height)
-    this.ctx.fillText(`THR ${this.throttle}`, 15, 0.9 * this.height)
+    const left = centre - LEFT_COLUMN
+    this.ctx.textAlign = "left"
+    this.ctx.fillText(`AOA ${aoaText}`, left, 0.8 * this.height)
+    this.ctx.fillText(`M ${this.mach}`, left, 0.85 * this.height)
+    this.ctx.fillText(`THR ${this.throttle}`, left, 0.9 * this.height)
 
     if (this.throttle > 77) {
-      this.ctx.fillText(`AB`, 155, 0.9 * this.height)
+      this.ctx.fillText(`AB`, left + 160, 0.9 * this.height)
     }
 
     const gText = "" + this.g.toFixed(1)
 
-    this.ctx.fillText(`${gText} G`, 15, 0.2 * this.height)
+    this.ctx.fillText(`${gText} G`, left, 0.2 * this.height)
 
     this.drawPitchLadder()
     if (this.showFlightPath) this.drawFlightPathMarker()

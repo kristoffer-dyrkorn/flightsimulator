@@ -8,6 +8,7 @@ import {
   ShaderChunk,
   DirectionalLight,
   HemisphereLight,
+  LinearFilter,
   PerspectiveCamera,
   Object3D,
   PlaneGeometry,
@@ -344,6 +345,11 @@ let cockpitUnshadowedParts = []
 const hudGeometry = new PlaneGeometry(1, 1)
 const hudMaterial = new MeshBasicMaterial({ color: 0xffff00 })
 const hudTexture = new CanvasTexture(hudCanvas)
+// The HUD is seen at about its own size, so smaller versions of it would
+// add nothing - and it is uploaded anew every frame, so they would all be
+// made anew every frame too.
+hudTexture.generateMipmaps = false
+hudTexture.minFilter = LinearFilter
 hudMaterial.map = hudTexture
 hudMaterial.transparent = true
 
@@ -359,12 +365,15 @@ const HUD_LOOK_AXIS = new Vector3(0, 1, 0) // up, in the HUD camera's frame
 
 // The HUD sits where the model's HUD combiner glass is, straight ahead of the
 // pilot's eyes (see EYE_POSITION - the glass is 0.57 to 0.68 m in front of
-// them). It covers the same angle as it always has: 1 m wide at 2.2 m, about
-// 25.6 degrees - a flat panel seen from a camera at the eye looks exactly the
-// same at any distance, as long as that angle stays the same.
+// them). It covers the same angle top to bottom as it always has: 1 m at
+// 2.2 m, about 25.6 degrees - a flat panel seen from a camera at the eye
+// looks exactly the same at any distance, as long as that angle stays the
+// same. Across, it is as much wider as the HUD's canvas is, so the canvas's
+// pixels cover the same angle both ways.
 const HUD_DISTANCE = 0.625 // m
-const HUD_FIELD_OF_VIEW = 2 * Math.atan(0.5 / 2.2) // radians, across the panel
-const HUD_SIZE = 2 * HUD_DISTANCE * Math.tan(HUD_FIELD_OF_VIEW / 2) // m
+const HUD_FIELD_OF_VIEW = 2 * Math.atan(0.5 / 2.2) // radians, top to bottom
+const HUD_SIZE = 2 * HUD_DISTANCE * Math.tan(HUD_FIELD_OF_VIEW / 2) // m, top to bottom
+const HUD_ASPECT = hud.width / hud.height
 
 // The HUD glass's bottom edge sits just above the airframe in front of the
 // pilot - the glare shield and the nose - as seen from EYE_POSITION, so the
@@ -376,7 +385,7 @@ const HUD_BOTTOM_ELEVATION_DEFAULT = -15
 const HUD_CLEARANCE = 0.3 // degrees between the airframe and the glass
 
 const hudPlane = new Mesh(hudGeometry, hudMaterial)
-hudPlane.scale.set(HUD_SIZE, HUD_SIZE, 1)
+hudPlane.scale.set(HUD_SIZE * HUD_ASPECT, HUD_SIZE, 1)
 hudScene.add(hudPlane)
 
 // Moves the HUD glass up or down so its bottom edge is at bottomElevation
@@ -1456,7 +1465,7 @@ const LOOK_AHEAD_MIN = 0.3 // m
 function placeHudAboveAirframe(object) {
   f16.updateMatrixWorld(true)
   const toAircraft = f16.matrixWorld.clone().invert()
-  const halfWidth = HUD_FIELD_OF_VIEW / 2
+  const halfWidth = Math.atan(Math.tan(HUD_FIELD_OF_VIEW / 2) * HUD_ASPECT)
   const point = new Vector3()
   let highest = -Infinity
 
