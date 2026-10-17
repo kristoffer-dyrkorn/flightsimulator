@@ -32,6 +32,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 - `b` wheel brakes when on a runway
 - `h`: toggle HUD on and off
 - `t`: toggle turbulence and wind on and off
+- `n` and `m`: move the time of day 15 minutes back / forward
 - space bar: cycle views (cockpit view / follower camera / external camera)
 - `j` and `l`: rotate the cockpit view or external camera left and right
 - `i` and `k`: rotate the external camera up and down
@@ -67,6 +68,7 @@ Features after July 2025 have been made using AI.
 - You can now turn the head left and right in cockpit view
 - Updates to HUD: font change, simulated glow and landing mode
 - More realistic modeling of near-ground turbulence and steady wind, from zero to 3000 ft
+- Sky and landscape rendering adapting to sun position and time of day, with atmospheric scattering
 
 #### September 2026:
 
@@ -153,5 +155,6 @@ Extra startup parameters:
 - Provide starting point coordinates (in UTM 33N or GPS coordinates) using url parameters `e` and `n`. The default start point is south of Molde.
 - Altitude (in metres) can be given using the parameter `a`. Default is 1500 metres (5000 ft).
 - Start direction (compass angle) can be provided by `c`. Default is 0 degrees, ie due north.
+- Time of day, which sets where the sun is, can be given using `time`, for example `2026-06-21T22:30` (in the browser's own time zone) or `2026-06-21T22:30+02:00`. Default is the current time, kept within daylight: no earlier than dawn, and no later than an hour before dusk.
 
 Example: https://kristoffer-dyrkorn.github.io/flightsimulator/?n=6981000&e=110000&a=1000&c=270

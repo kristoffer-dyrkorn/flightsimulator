@@ -1,7 +1,8 @@
-import { Vector3, Sphere, Mesh, BufferGeometry, MeshBasicMaterial, TextureLoader, MathUtils } from "three"
+import { Vector3, Sphere, Mesh, BufferGeometry, MeshBasicMaterial, TextureLoader, MathUtils, Color } from "three"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js"
 import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
+import { useHorizonFog } from "../sky/horizonFog.js"
 
 const url = new URL(document.location)
 const urlParams = url.searchParams
@@ -27,8 +28,12 @@ export default class Tile {
     this.tileMesh.rotateX(90 * MathUtils.DEG2RAD)
 
     this.tileMesh.geometry = new BufferGeometry()
-    // use a very simple material, all light and shading of terrain is baked into the texture
+    // use a very simple material, all light and shading of terrain is baked into the texture -
+    // only tinted by the light of the time of day, the same for every tile (see Tile.light)
     this.tileMesh.material = new MeshBasicMaterial()
+    this.tileMesh.material.color = Tile.light
+    // fading with distance into the haze, in the horizon's colour behind it
+    useHorizonFog(this.tileMesh.material)
   }
 
   update(camera, showWireFrame) {
@@ -148,6 +153,12 @@ export default class Tile {
 }
 
 Tile.loadCount = 0
+
+// The terrain's colours are aerial photos, taken in daylight - this is what
+// they are multiplied by to show them in the light of another time of day:
+// dimmer and redder with the sun low, and dark at night. Shared by every
+// tile's material, so setting it relights all of them. See index.js.
+Tile.light = new Color(1, 1, 1)
 
 // the BVH jobs waiting for the worker, see load()
 Tile.bvhQueue = Promise.resolve()

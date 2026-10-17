@@ -5,8 +5,9 @@ import {
   Scene,
   Color,
   FogExp2,
+  ShaderChunk,
   DirectionalLight,
-  AmbientLight,
+  HemisphereLight,
   PerspectiveCamera,
   Object3D,
   PlaneGeometry,
@@ -43,6 +44,10 @@ import LandingGearRig from "./graphics/landingGearRig.js"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
+import { sunPosition, twilight } from "./sky/sun.js"
+import { sunTransmittance, haze, luminance, GROUND_ALBEDO } from "./sky/atmosphere.js"
+import SkyDome from "./sky/SkyDome.js"
+import { updateHorizonFog } from "./sky/horizonFog.js"
 import proj4 from "proj4"
 
 // terrain boundaries, in UTM33 coordinates
@@ -130,8 +135,7 @@ renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = PCFSoftShadowMap
 // the scene and the aircraft are drawn in two passes into the same buffers
-// (see drawScene). The first pass still clears, since a color
-// scene.background forces a clear regardless of autoClear.
+// (see drawScene), which clears them itself before the first
 renderer.autoClear = false
 
 const hudCanvas = document.getElementById("hud")
@@ -139,8 +143,27 @@ const hud = new HUDObject(hudCanvas)
 
 const scene = new Scene()
 
-scene.background = new Color(0.74, 0.74, 0.82).convertSRGBToLinear()
-scene.fog = new FogExp2(scene.background, 0.000042)
+// the sky, drawn behind everything else - see updateSun. The terrain fades
+// into the fog with distance, and the fog takes the horizon's colour: the
+// colour of the horizon behind it, for the terrain (see horizonFog.js), and
+// the horizon's averaged all round, for the aircraft.
+const sky = new SkyDome()
+scene.add(sky)
+scene.fog = new FogExp2(sky.fogColor, haze(0))
+// the sky's own colour, kept up to date by it as it changes
+scene.fog.color = sky.fogColor
+
+// The air dims what is seen through it exponentially with distance, by the
+// same share for every kilometre, so three's FogExp2 - which thickens with
+// the square of the distance - is made plain exponential here, for every
+// material: density is then the share of light lost per meter. As FogExp2
+// was, it hid the terrain thirty kilometres off almost completely, leaving
+// distant mountains a flat white; through a clear day's air a quarter of
+// their own colour still shows at fifty.
+ShaderChunk.fog_fragment = ShaderChunk.fog_fragment.replace(
+  "fogDensity * fogDensity * vFogDepth * vFogDepth",
+  "fogDensity * vFogDepth",
+)
 
 // the aircraft lives in its own scene, which is shifted so that the
 // aircraft sits at the origin while it is being rendered. World coordinates
@@ -158,8 +181,16 @@ aircraftScene.fog = scene.fog
 // shifted aircraft scene's frame
 const aircraftCamera = new PerspectiveCamera()
 
-// add lights to the scene, to propely display the f16 model
-const directionalLight = new DirectionalLight(0xcdb5ae, 1.5)
+// add lights to the scene, to propely display the f16 model. The sunlight
+// has this colour with the sun SUNLIGHT_REFERENCE_ELEVATION degrees up, and
+// is filtered from there by the atmosphere as the sun moves, and seen
+// through the sky's exposure - see updateSun and sky.onUpdate, which also
+// sets how strong it is. White, as the daylight the terrain's photos were
+// taken in shows in them - a warm pinkish beige before, which tinted the
+// sunlit side of the aircraft pink once it was lit as brightly as the
+// terrain.
+const SUNLIGHT_COLOR = new Color(0xffffff)
+const directionalLight = new DirectionalLight(SUNLIGHT_COLOR, 1)
 aircraftScene.add(directionalLight)
 aircraftScene.add(directionalLight.target)
 
@@ -169,7 +200,9 @@ aircraftScene.add(directionalLight.target)
 // whole airframe (~15 m long, ~9.5 m wingspan) in any orientation, since
 // the ground shadow is the airframe's own outline seen along the light. Its
 // depth is stretched down to the ground each frame, for the ground shadow.
-const LIGHT_DIRECTION = new Vector3(0, -0.2, 0.8).normalize()
+// The light comes from the sun, in sunDirection - towards it, in the
+// scene's own frame (x east, y north, z up), kept up to date by updateSun.
+const sunDirection = new Vector3(0, -0.2, 0.8).normalize()
 const SHADOW_LIGHT_DISTANCE = 50
 const SHADOW_EXTENT = 10
 
@@ -194,6 +227,10 @@ const COCKPIT_SHADOW_NORMAL_BIAS = 0.1
 const MAX_GROUND_SHADOW_HEIGHT = 500
 const GROUND_SHADOW_MARGIN = 100
 const GROUND_SHADOW_OPACITY = 0.5
+// and only with the sun at least this high (sine of 5 degrees) - a lower
+// sun casts the shadow kilometres away from the aircraft, and stretched out
+// long and faint
+const GROUND_SHADOW_MIN_SUN = Math.sin(5 * MathUtils.DEG2RAD)
 
 directionalLight.castShadow = true
 directionalLight.shadow.mapSize.set(2048, 2048)
@@ -205,7 +242,16 @@ directionalLight.shadow.camera.near = SHADOW_LIGHT_DISTANCE - SHADOW_EXTENT
 directionalLight.shadow.camera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
 directionalLight.shadow.normalBias = SHADOW_NORMAL_BIAS
 
-const ambientLight = new AmbientLight(0xc7d4ed, 0.8)
+// The light from all round that isn't the sun's: from the sky above, and
+// from the sunlit ground below, in the hue of AMBIENT_COLOR. They follow the
+// sky's own light and the ground's, so the underside of the aircraft darkens
+// with the terrain at dusk, and the top takes on the sky's colour. See
+// sky.onUpdate. Its "up" is the direction to it, so it is kept straight
+// above the aircraft, as the sunlight is kept towards the sun - see
+// drawScene.
+const AMBIENT_COLOR = new Color(0xc7d4ed)
+const ambientLight = new HemisphereLight(AMBIENT_COLOR, AMBIENT_COLOR, 1)
+const UP = new Vector3(0, 0, 1)
 aircraftScene.add(ambientLight)
 
 const groundShadow = new GroundShadow(aircraftScene, GROUND_SHADOW_OPACITY)
@@ -363,6 +409,10 @@ camera.position.set(startPoint[0], startPoint[1], startPoint[2])
 // convert requested compass direction to direction inside UTM grid
 startDirection -= startPoint[3]
 
+// the grid convergence at the start point, until it is next updated below -
+// without it the HUD heading is off by it for the first minute
+compassOffset = startPoint[3]
+
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 
 // set up physics simulation, flying in a surface wind read from the forecast at
@@ -376,6 +426,142 @@ airplaneState.init(startPoint, startDirection)
 // terrain below the start point is at sea level. the turbulence model needs a
 // height from the first step onwards, and it scales its eddies by it.
 heightAboveGround = startPoint[2]
+
+// Time of day, for the sun. It follows the real clock, unless a moment is
+// given in the `time` url parameter - anything Date understands, such as
+// 2026-06-21T22:30 in the browser's own time zone, or 2026-06-21T22:30+02:00
+// in another - and the n and m keys step it back and forth. Kept as an
+// offset from the clock, so time still passes while flying.
+//
+// Started on the clock, it starts in daylight: no earlier than dawn, and no
+// later than DAYLIGHT_LEFT before dusk, so there is light to fly in for a
+// while - see daylightStart. A time given in the url is kept as it is.
+const TIME_STEP = 15 * 60 * 1000 // ms, per press of n or m
+const DAYLIGHT_LEFT = 60 * 60 * 1000 // ms
+const startTime = new Date(urlParams.get("time"))
+let timeOffset =
+  urlParams.has("time") && !isNaN(startTime)
+    ? startTime.getTime() - Date.now()
+    : daylightStart(new Date(), startPoint[4][1], startPoint[4][0]).getTime() - Date.now()
+
+// the moment given, moved forward to dawn if it is before it, or back to
+// DAYLIGHT_LEFT before dusk if it is after that, on its day at lat, lon
+function daylightStart(date, lat, lon) {
+  const { dawn, dusk } = twilight(date, lat, lon)
+  if (dawn && date < dawn) return dawn
+  if (dusk && date.getTime() > dusk.getTime() - DAYLIGHT_LEFT) return new Date(dusk.getTime() - DAYLIGHT_LEFT)
+  return date
+}
+
+// the atmosphere's filtering of the sunlight at the elevation where it has
+// SUNLIGHT_COLOR as it is - see updateSun
+const SUNLIGHT_REFERENCE_ELEVATION = 40
+const SUNLIGHT_REFERENCE = sunTransmittance(SUNLIGHT_REFERENCE_ELEVATION)
+const sunlightFilter = new Color()
+
+// Points the sunlight at where the sun is in the sky above the aircraft right
+// now, and gives it the colour of what gets through the atmosphere from
+// there: reddened and dimmed with the sun low, and gone once it has set -
+// and has the sky, and the fog, take on the colours of that time of day.
+// The sun moves a quarter of a degree a minute, so this runs once a second
+// rather than every frame.
+function updateSun() {
+  const east = airplaneState.epos * SimulationConstants.FEET_TO_METERS
+  const north = airplaneState.npos * SimulationConstants.FEET_TO_METERS
+  const altitude = airplaneState.alt * SimulationConstants.FEET_TO_METERS
+
+  const [lon, lat] = proj4(UTM33N_PROJECTION).inverse([east, north])
+  const sun = sunPosition(new Date(Date.now() + timeOffset), lat, lon)
+
+  // the azimuth is from true north, while the scene's y axis points to
+  // grid north - a few degrees apart away from the zone's central meridian
+  const azimuth = (sun.azimuth - getCompassOffset(east, north)) * MathUtils.DEG2RAD
+  const elevation = sun.elevation * MathUtils.DEG2RAD
+  sunDirection.set(
+    Math.sin(azimuth) * Math.cos(elevation),
+    Math.cos(azimuth) * Math.cos(elevation),
+    Math.sin(elevation),
+  )
+
+  // seen from the aircraft's own height, so the sun sets later up high
+  const transmittance = sunTransmittance(sun.elevation, altitude)
+  sunlightFilter.setRGB(...transmittance.map((t, i) => t / SUNLIGHT_REFERENCE[i]))
+  directionalLight.color.copy(SUNLIGHT_COLOR).multiply(sunlightFilter)
+  // the intensity follows the sky's exposure - see updateLight
+
+  // a shadow is only as dark as the sunlight it holds back is strong
+  groundShadow.material.opacity = GROUND_SHADOW_OPACITY * Math.min(1, sunlightFilter.g)
+
+  sky.update(sunDirection, sun.elevation, altitude)
+
+  // as thick as the air halfway down from the aircraft to sea level, a
+  // rough middle of the air between it and the terrain it sees in the
+  // distance - thinner the higher it flies, above most of the haze
+  scene.fog.density = haze(altitude / 2)
+
+  return sun
+}
+
+// Once the sky has caught up with the sun (see updateSun), lights the rest
+// to match, all seen through the sky's own exposure: the terrain by the
+// light falling on the ground - which also takes it from the daylight its
+// photos were taken in to the light of the time of day - and the aircraft by
+// the sunlight, the sky above and the ground below.
+//
+// The aircraft's lights are as strong as it takes for it to match the
+// terrain: a surface of it lit as the ground was when the photos were taken
+// shows its own colours as brightly as the photos show theirs. three's
+// lighting divides by pi (a white surface facing a light of intensity 1
+// shows 1 / pi of it), and the photos' daylight is mostly the sun's - so
+// the sunlight comes out around 4, and the sky's and the ground's light
+// below 0.5, each over the luminance of its colour. Set by hand, at 1.5 and
+// 0.8, the aircraft came out several times darker than the terrain around
+// it, though its grey paint is lighter than the forest and rock below.
+//
+// The terrain is lit as level ground, which a low sun only grazes, so it
+// dims with the sun's height - while a side of the aircraft facing a low sun
+// takes it almost head on, and came out several times brighter than the
+// terrain below. So the sunlight on the aircraft dims with the sun's height
+// the same way: by how much less of it level ground gets than with the sun
+// at SUNLIGHT_REFERENCE_ELEVATION.
+sky.onUpdate = () => {
+  Tile.light.setRGB(...sky.groundLight)
+  cockpitInteriorFlatMaterial.color.copy(COCKPIT_INTERIOR_FLAT_COLOUR).multiplyScalar(luminance(sky.groundLight))
+  updateHorizonFog(sky.horizonColors, sky.sunDirection)
+
+  const daylight = luminance(sky.referenceGroundLight)
+  const sunlight = (Math.PI * luminance(SUNLIGHT_REFERENCE)) / daylight
+  const skylight = (Math.PI * luminance(sky.referenceSkyLight)) / daylight
+  const groundLight = Math.PI * GROUND_ALBEDO
+
+  const sunHeight =
+    Math.max(0, Math.sin(sky.sunElevation * MathUtils.DEG2RAD)) /
+    Math.sin(SUNLIGHT_REFERENCE_ELEVATION * MathUtils.DEG2RAD)
+
+  directionalLight.intensity = (sunlight / luminance(SUNLIGHT_COLOR.toArray())) * sky.adaptation * sunHeight
+  ambientLight.color
+    .copy(AMBIENT_COLOR)
+    .multiply(lightShare.setRGB(...sky.skyLight))
+    .multiplyScalar(skylight / luminance(AMBIENT_COLOR.toArray()))
+  ambientLight.groundColor
+    .copy(AMBIENT_COLOR)
+    .multiply(lightShare.setRGB(...sky.groundLight))
+    .multiplyScalar(groundLight / luminance(AMBIENT_COLOR.toArray()))
+}
+const lightShare = new Color()
+
+function logSun() {
+  const sun = updateSun()
+  console.log(
+    "Time: %s - sun at azimuth %d, elevation %s degrees",
+    new Date(Date.now() + timeOffset).toString(),
+    Math.round(sun.azimuth),
+    sun.elevation.toFixed(1),
+  )
+}
+
+logSun()
+setInterval(updateSun, 1000)
 
 // Fly in the real weather: ask MET what the wind is doing over the start point,
 // and then, a corner at a time and a few seconds apart, at the corners of the
@@ -503,15 +689,15 @@ function updateGroundShadow() {
 
   shadowCamera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
 
-  if (heightAboveGround < MAX_GROUND_SHADOW_HEIGHT) {
+  if (heightAboveGround < MAX_GROUND_SHADOW_HEIGHT && sunDirection.z > GROUND_SHADOW_MIN_SUN) {
     // distance along the light from the aircraft down to the ground
-    const groundDistance = heightAboveGround / LIGHT_DIRECTION.z
+    const groundDistance = heightAboveGround / sunDirection.z
     shadowCamera.far += groundDistance + GROUND_SHADOW_MARGIN
 
     // the shadow's center on the ground, and the tiles under the corners
     // of the shadow box around it
-    const centerX = f16.position.x - LIGHT_DIRECTION.x * groundDistance
-    const centerY = f16.position.y - LIGHT_DIRECTION.y * groundDistance
+    const centerX = f16.position.x - sunDirection.x * groundDistance
+    const centerY = f16.position.y - sunDirection.y * groundDistance
 
     for (const dx of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
       for (const dy of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
@@ -837,7 +1023,8 @@ function drawScene(currentFrametime) {
 
   // keep the shadow camera centered on the aircraft
   directionalLight.target.position.copy(f16.position)
-  directionalLight.position.copy(f16.position).addScaledVector(LIGHT_DIRECTION, SHADOW_LIGHT_DISTANCE)
+  directionalLight.position.copy(f16.position).addScaledVector(sunDirection, SHADOW_LIGHT_DISTANCE)
+  ambientLight.position.copy(f16.position).add(UP)
   updateGroundShadow()
 
   chaseObject.update(f16, frameTime)
@@ -862,6 +1049,7 @@ function drawScene(currentFrametime) {
   terrain.update(camera, showWireFrame)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
 
+  renderer.clear()
   renderer.render(scene, cameras[currentCamera])
 
   // render the aircraft relative to its own position (see aircraftScene).
@@ -874,7 +1062,7 @@ function drawScene(currentFrametime) {
   const inCockpit = currentCamera === 0
   for (const part of cockpitHiddenParts) part.visible = !inCockpit
   for (const part of cockpitUnshadowedParts) part.receiveShadow = !inCockpit
-  paintCockpitInterior(inCockpit)
+  paintCockpitInterior(inCockpit, inCockpit && Math.abs(wrapDegrees(cockpitLook.yaw)) < COCKPIT_INTERIOR_FLAT_YAW)
 
   renderer.render(aircraftScene, aircraftCamera)
 
@@ -1154,8 +1342,14 @@ function separateHudSidePanels(object) {
 // sun. The F-16's grey paint is matte, so it gets a faint, tighter sheen
 // instead. Done before the cockpit interior is split off, which shares this
 // material in the exterior views.
+//
+// The paint texture itself is dark - its middle grey reflects about 7% of
+// the light - while the F-16's greys reflect from around 10 to 35%. With the
+// aircraft lit to match the terrain (see sky.onUpdate) it came out nearly
+// charcoal, so the texture is brightened by PAINT_BRIGHTNESS, to about 20%.
 const PAINT_SPECULAR = 0x1a1a1a
 const PAINT_SHININESS = 20
+const PAINT_BRIGHTNESS = 2.5
 
 function tonePaintSheen(object) {
   object.traverse((child) => {
@@ -1164,6 +1358,7 @@ function tonePaintSheen(object) {
       if (material.name !== "Body") continue
       material.specular.set(PAINT_SPECULAR)
       material.shininess = PAINT_SHININESS
+      material.color.setScalar(PAINT_BRIGHTNESS)
     }
   })
 }
@@ -1190,14 +1385,26 @@ const cockpitInteriorMaterial = new MeshPhongMaterial({
   shininess: 10,
 })
 
+// Looking ahead from the cockpit, the interior in view - the glare shield
+// and the cockpit rim below the HUD - is shown in an even grey, without the
+// sun's shading and shadows moving over it as the aircraft turns. It still
+// dims with the daylight, as the terrain does (see sky.onUpdate), so it
+// doesn't glow at night. That is for as long as it stays in view as the
+// pilot looks round - up to COCKPIT_INTERIOR_FLAT_YAW degrees either side,
+// where it has gone out of sight, so the change back to the shaded grey
+// isn't seen.
+const COCKPIT_INTERIOR_FLAT_YAW = 90
+const COCKPIT_INTERIOR_FLAT_COLOUR = new Color(COCKPIT_INTERIOR_COLOUR)
+const cockpitInteriorFlatMaterial = new MeshBasicMaterial({ color: COCKPIT_INTERIOR_COLOUR })
+
 // the cockpit interior parts, with the material each has in the exterior views
 let cockpitInteriorParts = []
 
-// gives the cockpit interior its grey for the cockpit view, or its own
-// material back for the exterior views
-function paintCockpitInterior(inCockpit) {
+// gives the cockpit interior its grey for the cockpit view - unshaded with
+// the pilot looking ahead - or its own material back for the exterior views
+function paintCockpitInterior(inCockpit, lookingAhead) {
   for (const { mesh, exteriorMaterial } of cockpitInteriorParts) {
-    mesh.material = inCockpit ? cockpitInteriorMaterial : exteriorMaterial
+    mesh.material = !inCockpit ? exteriorMaterial : lookingAhead ? cockpitInteriorFlatMaterial : cockpitInteriorMaterial
   }
 }
 
@@ -1424,6 +1631,14 @@ function keyboardHandler(keyboardEvent) {
       break
     case "w":
       showWireFrame = !showWireFrame
+      break
+    case "n": // time of day back
+      timeOffset -= TIME_STEP
+      logSun()
+      break
+    case "m": // time of day forward
+      timeOffset += TIME_STEP
+      logSun()
       break
     case "g": // landing gear up/down
       gearDown = !gearDown
