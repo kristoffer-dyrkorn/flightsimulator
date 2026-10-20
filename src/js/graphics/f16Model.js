@@ -18,7 +18,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import { mixFlaperons } from "../hifimodel/flaperons.js"
 
 /*
- * The F-16 model in f16-3/f16.glb (converted from f16-2 - see its own
+ * The F-16 model in f16/f16.glb (converted from f16-2 - see its own
  * history), placed on the aircraft and rigged to the simulation.
  *
  * Its skeleton moves every movable part: the control surfaces and the
@@ -84,9 +84,8 @@ const SURFACES = [
 // The paint textures are dark - the fuselage's grey shows at about 10%
 // reflectance - while the F-16's greys reflect from around 10 to 35%. Lit
 // to match the terrain (see sky.onUpdate in index.js) the aircraft came out
-// nearly charcoal, so the painted parts are brightened by this - the same
-// treatment the earlier model's paint got (PAINT_BRIGHTNESS in index.js),
-// and bringing them to the same brightness in the same light.
+// nearly charcoal, so the painted parts are brightened by this, to the
+// brightness the F-16's greys have in the same light.
 const PAINT_BRIGHTNESS = 2.4
 const PAINTED = ["Body", "Body_RightFin", "Canopy", "Accessories", "Fuel Tank"]
 
@@ -201,7 +200,7 @@ export function loadF16Model(f16, ktx2Loader, decoder, onLoad) {
     .setKTX2Loader(ktx2Loader)
     .setMeshoptDecoder(decoder)
     .load(
-      "f16-3/f16.glb",
+      "f16/f16.glb",
       (gltf) => onLoad(new F16Rig(f16, gltf)),
       () => {},
       (error) => console.log("Could not load the F-16 model: " + error),

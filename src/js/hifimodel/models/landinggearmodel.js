@@ -221,9 +221,8 @@ function tireForce(pointU, pointV, upForce, rollingCoeff, rollRampVelocity, stee
   }
 }
 
-/* Where the bottoms of the visual tires are, body frame, ft - measured from
-   gear.glb as index.js places it on the aircraft, which matches the real
-   F-16's 4.00 m wheelbase and 2.36 m track. The model shows the struts
+/* Where the bottoms of the visual tires are, body frame, ft - matching the
+   real F-16's 4.00 m wheelbase and 2.36 m track. The model shows the struts
    fully extended, which makes these the contact points; the struts'
    compression is animated on top of that (see strutTravel). */
 const VISUAL_NOSE_TIRE = { x: 12.27, z: 5.78 }

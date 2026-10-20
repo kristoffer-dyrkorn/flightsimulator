@@ -13,19 +13,13 @@ import {
   Object3D,
   PlaneGeometry,
   MeshBasicMaterial,
-  MeshPhongMaterial,
   CanvasTexture,
   Mesh,
   MathUtils,
   Ray,
   Vector3,
-  Quaternion,
-  Triangle,
-  LoadingManager,
   PCFSoftShadowMap,
 } from "three"
-import { MTLLoader } from "three/addons/loaders/MTLLoader.js"
-import { OBJLoader } from "three/addons/loaders/OBJLoader.js"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
 import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
@@ -38,10 +32,7 @@ import RungeKutta4 from "./hifimodel/integrator.js"
 import ActuatorModel from "./hifimodel/models/actuatormodel.js"
 import SimulationConstants from "./hifimodel/simulationconstants.js"
 import ChaseObject from "./graphics/ChaseObject.js"
-import { splitOffTriangles } from "./graphics/splitMesh.js"
 import GroundShadow from "./graphics/GroundShadow.js"
-import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
-import LandingGearRig from "./graphics/landingGearRig.js"
 import { loadF16Model, EYE_POSITION as F16_EYE_POSITION } from "./graphics/f16Model.js"
 import { MeshoptDecoder } from "./externals/meshopt_decoder.module"
 import Gamepad from "./controller/gamepad.js"
@@ -93,14 +84,14 @@ let heightAboveGround = 0
 
 let gamepad = null
 let engineSound = null
-let controlSurfaceRig = null
-let landingGearRig = null
+// the aircraft model, rigged - see graphics/f16Model.js
+let f16Rig = null
 
 // the pilot's commanded gear position - up/down, instant, exactly like a
 // real gear handle - not the actual gear position. That's
 // controlActuators.gear, rate-limited to a real transition time (see
 // ActuatorModel's own comment) and what both the aerodynamic model's gear
-// drag and landingGearRig's visual animation actually ride on. This one is
+// drag and the model's gear animation actually ride on. This one is
 // still what landing-legality checks below care about (a real pilot is
 // judged on when they moved the handle, not on the hydraulics catching
 // up), and it's what the "g" key toggles. Starts up, matching the sim's
@@ -286,24 +277,11 @@ const externalCameraPosition = {
 
 const EXTERNAL_CAMERA_SLEW_STEP = 4.8
 
-// The pilot's eye point, meters, in the aircraft model's own frame (x right,
-// y forward, z up, from the centre of gravity) - measured from f16.obj: the
-// top of the pilot figure's head is 0.99 m up, between 5.04 and 5.95 m
-// forward, and the HUD glass in front of it reaches 0.84 m up. The cockpit
-// camera sits here, looking along the aircraft's nose axis. The height is
-// set so the view down over the nose, along the top of the glare shield,
-// is the F-16's quoted 15 degrees - from 0.88 m up it is 15.2, and the HUD
-// glass's bottom edge lands just above it (see placeHudAboveAirframe). It
-// is also 11 cm below the top of the pilot figure's head, about where eyes
-// are. A real pilot sets the seat height against a HUD test pattern to put
-// their eyes at the HUD's design eye point, the one place its symbology
-// lines up with the world outside.
-// The aircraft model: the one in f16-3 (see graphics/f16Model.js), or with
-// the `oldmodel` url parameter the earlier one, f16/f16.obj with its gear
-// from f16/gear.glb. The eye point above is that earlier model's - the
-// f16-3 model has its own, see F16_EYE_POSITION.
-const OLD_MODEL = new URL(document.location).searchParams.has("oldmodel")
-const EYE_POSITION = OLD_MODEL ? new Vector3(0, 5.25, 0.88) : F16_EYE_POSITION.clone()
+// The pilot's eye point, meters, in the aircraft frame (x right, y forward,
+// z up, from the centre of gravity) - the model's own, see F16_EYE_POSITION
+// in graphics/f16Model.js. The cockpit camera sits here, looking along the
+// aircraft's nose axis.
+const EYE_POSITION = F16_EYE_POSITION.clone()
 
 // Where the pilot is looking, from the cockpit: degrees of yaw from straight
 // ahead, positive to the left. The look keys set the target, and the view
@@ -332,22 +310,14 @@ const COCKPIT_FAR = 100
 const f16 = new Object3D()
 aircraftScene.add(f16)
 
-// parts of the model hidden in the cockpit view: the pilot figure (the
-// camera is inside its head), the model's HUD glass and the panels either
-// side of it (the simulator draws its own HUD there), and the ejection seat
-// (the camera sits between its side walls and in front of its headrest, so
-// looking sideways or back they would fill much of the view)
-const COCKPIT_HIDDEN_PARTS = ["Pilot", "Glass_HUD", "HUD_SidePanels", "Eject_Seat"]
+// Parts of the model hidden in the cockpit view, parts that don't receive
+// the aircraft's own shadows there (so close to the eye that the shadows on
+// them flicker), and the cockpit interior's parts with the materials they
+// are drawn with there and outside - all from the model, see
+// graphics/f16Model.js
 let cockpitHiddenParts = []
-
-// Parts of the model that don't receive the aircraft's own shadows in the
-// cockpit view: the cockpit interior and the fuselage around the canopy
-// (see separateCockpitSurroundings). They are so close to the eye there that
-// one shadow map texel covers dozens of pixels, and the self-shadows on them
-// flicker with every small change in attitude however the shadow biases are
-// set. They still cast shadows, and the exterior views are unchanged.
-const COCKPIT_UNSHADOWED_PARTS = ["Cockpit_Interior", "Canopy_Inside", "Cockpit_Surroundings"]
 let cockpitUnshadowedParts = []
+let cockpitInteriorParts = []
 
 const hudGeometry = new PlaneGeometry(1, 1)
 const hudMaterial = new MeshBasicMaterial({ color: 0xffff00 })
@@ -542,7 +512,6 @@ function updateSun() {
 // at SUNLIGHT_REFERENCE_ELEVATION.
 sky.onUpdate = () => {
   Tile.light.setRGB(...sky.groundLight)
-  cockpitInteriorFlatMaterial.color.copy(COCKPIT_INTERIOR_FLAT_COLOUR).multiplyScalar(luminance(sky.groundLight))
   for (const part of cockpitInteriorParts) {
     if (!part.flatMaterial) continue
     if (part.flatTint) part.flatMaterial.color.copy(part.flatTint).multiplyScalar(luminance(sky.groundLight))
@@ -759,17 +728,16 @@ function isPositionOnRunway(worldPosition) {
 // below and the periodic landing-status log, so both are always looking at
 // exactly the same numbers.
 //
-// The wheels themselves never move (the gear rig is a visibility toggle,
-// not an animated one - see landingGearRig.js), so closestWheelClearance is
-// always where they'd be if extended, whether gear is down or not; that's
-// what lets a gear-up approach still read as "close to the ground" here
-// without it being mistaken for a real touch anywhere this is used.
+// The wheels checked are where they are with the gear extended, whether it
+// is down or not (see WHEEL_CENTRES in graphics/f16Model.js); that's what
+// lets a gear-up approach still read as "close to the ground" here without
+// it being mistaken for a real touch anywhere this is used.
 //
 // onRunway looks at every wheel that is touching the ground, not just the
 // lowest one - a touchdown with one main wheel on the runway and the other
 // in the grass beside it is not a landing on the runway.
 function evaluateLandingConditions() {
-  const wheels = landingGearRig?.wheels
+  const wheels = f16Rig?.wheels
   let closestWheelClearance = Infinity
   let touchingWheels = 0
   let touchingWheelsOnRunway = 0
@@ -925,7 +893,7 @@ setInterval(() => {
     }
 
     // The distance-from-aircraft "too low" check below is a coarse backstop
-    // for when there's no wheel telemetry yet (landingGearRig hasn't
+    // for when there's no wheel telemetry yet (the model hasn't
     // loaded) - once there is, the wheel-based check above already covers
     // this, more precisely (GEAR_CONTACT_CLEARANCE, not an arbitrary 4 m)
     // and more completely (three sample points under nose and both main
@@ -1010,17 +978,15 @@ function drawScene(currentFrametime) {
 
   renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
   renderState.updateAircraftModel(f16)
-  controlSurfaceRig?.update(controlActuators)
+  f16Rig?.setControls(controlActuators)
 
   // controlActuators.gear is the same rate-limited 0..1 actuator position
   // the aerodynamic model's gear drag already rides on (see
   // ActuatorModel's own comment) - passing it straight through here is
-  // what gives the visual gear a real transition instead of a snap toggle,
-  // now that landingGearRig actually animates rather than just hiding/
-  // showing parts
+  // what gives the visual gear a real transition instead of a snap toggle
   const strutTravel = f16simulation.landingGearModel.strutTravel(renderState)
   for (const leg in strutTravel) strutTravel[leg] *= SimulationConstants.FEET_TO_METERS
-  landingGearRig?.update(controlActuators.gear, controlActuators.noseSteer, strutTravel)
+  f16Rig?.update(controlActuators.gear, controlActuators.noseSteer, strutTravel)
 
   if (hudPlane.visible) {
     hud.update(
@@ -1070,7 +1036,7 @@ function drawScene(currentFrametime) {
 
   terrain.update(camera, showWireFrame)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
-  landingGearRig?.setEngine?.(renderState.pow, sky.adaptation)
+  f16Rig?.setEngine(renderState.pow, sky.adaptation)
 
   renderer.clear()
   renderer.render(scene, cameras[currentCamera])
@@ -1172,256 +1138,18 @@ async function getStartpointFromParameters(urlParams) {
   return [east, north, alt, rotation, lonlat]
 }
 
-// f16-5/f16.glb is authored in its own arbitrary units - this converts them
-// to meters, calibrated against the real F-16's ~9.45 m clean wingspan versus
-// the model's own wingspan measured in raw units. The OBJ, by contrast, was
-// already authored directly in meters (its own hinge points and (0, 2, -1.6)
-// offset are all meter-scale numbers), so this same factor - which turns the
-// GLB's gear into real-world meters - is what makes the extracted gear a
-// physically correct size to attach to the OBJ.
-const GEAR_MODEL_SCALE = 0.557
-
-// gear legs, wheels, and gear-bay doors - the only nodes kept visible out of
-// f16-5/f16.glb once it's reduced to "a source of landing gear geometry" for
-// the OBJ. See landingGearRig.js for what drives them.
-//
-// The GLB's nose-to-main-gear spacing doesn't scale onto the OBJ's own
-// fuselage as a single rigid offset - fixing the main gear under the OBJ's
-// wing root left the nose gear as far aft as the tail. The two models don't
-// share proportions, so nose and main gear each get their own correction
-// (added to that part's own existing position, in the GLB's local space)
-// instead of one offset for the whole model. Both are tuned by eye against
-// the OBJ's fuselage and need iterating further if they look off.
-const NOSE_GEAR_NAMES = [
-  "F-16_chassesFront1_LOD0_4",
-  "F-16_chassesFront2_LOD0_5",
-  "F-16_chassesFront3_LOD0_6",
-  "F-16_whel_LOD0_36",
-  "F-16_capFlont_LOD0_1",
-]
-const NOSE_GEAR_OFFSET = [0, 0, -0.02]
-
-// The main gear is placed to match the real F-16's 4.00 m wheelbase and
-// 2.36 m track, which puts the wheels just aft of the CG like on the real
-// aircraft. The legs are moved out sideways to get that track; the doors
-// only move aft, as they are already placed against the belly.
-const MAIN_GEAR_LEFT_LEG_NAMES = [
-  "F-16_chassesL1_LOD0_7",
-  "F-16_chassesL2_LOD0_8",
-  "F-16_chassesL3_LOD0_9",
-  "F-16_chassesL4_LOD0_10",
-  "F-16_whelL_LOD0_37",
-]
-const MAIN_GEAR_RIGHT_LEG_NAMES = [
-  "F-16_chassesR1_LOD0_11",
-  "F-16_chassesR2_LOD0_12",
-  "F-16_chassesR3_LOD0_13",
-  "F-16_chassesR4_LOD0_14",
-  "F-16_whelR_LOD0_38",
-]
-const MAIN_GEAR_DOOR_NAMES = ["F-16_capL_LOD0_2", "F-16_capR_LOD0_3"]
-const MAIN_GEAR_OFFSET = [0, -0.04, -0.02]
-const MAIN_GEAR_TRACK_OFFSET = 0.07
-
 function loadAircraftModel(f16) {
-  if (!OLD_MODEL) {
-    // the transcoder needs to know the renderer before any texture arrives
-    Tile.ktx2Loader.detectSupport(renderer)
-    loadF16Model(f16, Tile.ktx2Loader, MeshoptDecoder, (rig) => {
-      enableShadows(rig.object)
-      controlSurfaceRig = { update: (actuators) => rig.setControls(actuators) }
-      landingGearRig = rig
-      cockpitHiddenParts = rig.cockpitHiddenParts
-      cockpitUnshadowedParts = rig.cockpitUnshadowedParts
-      cockpitInteriorParts = rig.cockpitInteriorParts
-      placeHudAboveAirframe(rig.object)
-    })
-    return
-  }
-
-  const manager = new LoadingManager()
-  new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
-    materials.preload()
-
-    new OBJLoader(manager)
-      .setMaterials(materials)
-      .setPath("f16/")
-      .load(
-        "f16.obj",
-        (object) => {
-          object.position.set(0, 2, -1.6)
-
-          // align model with world axes
-          object.rotateX(90 * MathUtils.DEG2RAD)
-          object.rotateY(180 * MathUtils.DEG2RAD)
-
-          separateHudSidePanels(object)
-          tonePaintSheen(object)
-          colourCockpitInterior(object)
-          separateCockpitSurroundings(object)
-          enableShadows(object)
-          f16.add(object)
-          controlSurfaceRig = new ControlSurfaceRig(object)
-          cockpitHiddenParts = COCKPIT_HIDDEN_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
-          cockpitUnshadowedParts = COCKPIT_UNSHADOWED_PARTS.map((name) => object.getObjectByName(name)).filter(Boolean)
-          placeHudAboveAirframe(object)
-        },
-        (xhr) => {},
-        (error) => {
-          console.log("Could not load 3d model: " + error)
-        },
-      )
-  })
-
-  loadLandingGear(f16)
-}
-
-function loadLandingGear(f16) {
-  new GLTFLoader().load(
-    "f16/gear.glb",
-    (gltf) => {
-      const object = gltf.scene
-
-      object.scale.setScalar(GEAR_MODEL_SCALE)
-
-      // same axis alignment f16-5 needed when it was the whole visible model
-      // (see git history) - this file was cut down from f16-5/f16.glb to
-      // just the 17 gear/door parts actually used (see
-      // scripts/extract-landing-gear.js), carrying over the rotation its old
-      // parent node had, so it still needs the same single +90 correction to
-      // match the body frame f16's own quaternion expects.
-      object.rotateX(90 * MathUtils.DEG2RAD)
-
-      // the whole model's own origin needs no extra offset - the per-group
-      // corrections below handle placing the gear against the OBJ's
-      // fuselage, since a single offset for the whole model can't fit both
-      // the nose and main gear at once (see the comment above their names).
-      object.position.set(0, 0, 0)
-
-      enableShadows(object)
-      f16.add(object)
-
-      // NOSE_GEAR_OFFSET/MAIN_GEAR_OFFSET are meters, in f16's own local
-      // (body) frame - the same frame the OBJ's (0, 2, -1.6) offset is in.
-      // Each part sits several rotated, scaled levels down inside this GLB's
-      // own node hierarchy though, so the offset can't just be added to a
-      // part's .position directly (an earlier attempt to hand-convert it by
-      // un-rotating and un-scaling landed nowhere close - this GLB's root
-      // node bakes in its own extra rotation that a single object.quaternion
-      // inverse doesn't account for). Going through world space sidesteps
-      // that entirely: rotate the offset by f16's actual world orientation,
-      // add it to the part's actual current world position, then let
-      // three.js's own worldToLocal convert that back for us.
-      f16.updateWorldMatrix(true, true)
-      const f16WorldQuaternion = f16.getWorldQuaternion(new Quaternion())
-
-      function nudge(names, finalFrameOffset) {
-        const deltaWorld = new Vector3(...finalFrameOffset).applyQuaternion(f16WorldQuaternion)
-        for (const name of names) {
-          const part = object.getObjectByName(name)
-          if (!part) continue
-          const worldPos = part.getWorldPosition(new Vector3()).add(deltaWorld)
-          part.position.copy(part.parent.worldToLocal(worldPos))
-        }
-      }
-
-      nudge(NOSE_GEAR_NAMES, NOSE_GEAR_OFFSET)
-      nudge(MAIN_GEAR_LEFT_LEG_NAMES, [-MAIN_GEAR_TRACK_OFFSET, MAIN_GEAR_OFFSET[1], MAIN_GEAR_OFFSET[2]])
-      nudge(MAIN_GEAR_RIGHT_LEG_NAMES, [MAIN_GEAR_TRACK_OFFSET, MAIN_GEAR_OFFSET[1], MAIN_GEAR_OFFSET[2]])
-      nudge(MAIN_GEAR_DOOR_NAMES, MAIN_GEAR_OFFSET)
-
-      landingGearRig = new LandingGearRig(object)
-      tintGearToMatchBody(object)
-    },
-    (xhr) => {},
-    (error) => {
-      console.log("Could not load landing gear model: " + error)
-    },
-  )
-}
-
-// The two side panels either side of the HUD glass are part of the fuselage
-// mesh (LOD0) in the model, so they can't be hidden on their own - this moves
-// them into a mesh of their own, HUD_SidePanels, which the cockpit view hides
-// (see COCKPIT_HIDDEN_PARTS). They are the triangles that lie entirely inside
-// this box, meters in the aircraft frame (x right, y forward, z up, from the
-// centre of gravity) - two thin vertical plates, 0.10 to 0.14 m either side
-// of the centreline. Nothing else on the fuselage falls inside it.
-const HUD_SIDE_PANELS_BOX = { minAbsX: 0.09, maxAbsX: 0.15, minY: 5.79, maxY: 6.13, minZ: 0.58, maxZ: 0.88 }
-
-function separateHudSidePanels(object) {
-  const fuselage = object.getObjectByName("LOD0")
-  if (!fuselage) return
-
-  const box = HUD_SIDE_PANELS_BOX
-  const inside = (vertices) =>
-    vertices.every(
-      (p) =>
-        Math.abs(p.x) >= box.minAbsX &&
-        Math.abs(p.x) <= box.maxAbsX &&
-        p.y >= box.minY &&
-        p.y <= box.maxY &&
-        p.z >= box.minZ &&
-        p.z <= box.maxZ,
-    )
-
-  // the model's own vertices, taken into the aircraft frame
-  object.updateMatrix()
-  fuselage.updateMatrix()
-  const frame = object.matrix.clone().multiply(fuselage.matrix)
-
-  splitOffTriangles(fuselage, "HUD_SidePanels", frame, inside)
-}
-
-// The model's airframe material (Body in f16.mtl) has a strong and very
-// broad specular highlight - Ks 0.75 with Ns 8 - which spreads a reflection
-// of the sunlight's own colour, a warm pinkish beige, over large parts of the
-// airframe, and gives it a reddish tint from the cameras looking towards the
-// sun. The F-16's grey paint is matte, so it gets a faint, tighter sheen
-// instead. Done before the cockpit interior is split off, which shares this
-// material in the exterior views.
-//
-// The paint texture itself is dark - its middle grey reflects about 7% of
-// the light - while the F-16's greys reflect from around 10 to 35%. With the
-// aircraft lit to match the terrain (see sky.onUpdate) it came out nearly
-// charcoal, so the texture is brightened by PAINT_BRIGHTNESS, to about 20%.
-const PAINT_SPECULAR = 0x1a1a1a
-const PAINT_SHININESS = 20
-const PAINT_BRIGHTNESS = 2.5
-
-function tonePaintSheen(object) {
-  object.traverse((child) => {
-    if (!child.isMesh) return
-    for (const material of [child.material].flat()) {
-      if (material.name !== "Body") continue
-      material.specular.set(PAINT_SPECULAR)
-      material.shininess = PAINT_SHININESS
-      material.color.setScalar(PAINT_BRIGHTNESS)
-    }
+  // the transcoder needs to know the renderer before any texture arrives
+  Tile.ktx2Loader.detectSupport(renderer)
+  loadF16Model(f16, Tile.ktx2Loader, MeshoptDecoder, (rig) => {
+    enableShadows(rig.object)
+    f16Rig = rig
+    cockpitHiddenParts = rig.cockpitHiddenParts
+    cockpitUnshadowedParts = rig.cockpitUnshadowedParts
+    cockpitInteriorParts = rig.cockpitInteriorParts
+    placeHudAboveAirframe(rig.object)
   })
 }
-
-// Seen from the cockpit, the cockpit interior is painted grey - the
-// exterior views keep the model's own look. The model has no cockpit of its
-// own - the cockpit tub (floor, side walls, consoles, instrument panel, glare
-// shield) is part of the fuselage mesh, with the same texture as the outside
-// of the aircraft - so it is split off into a mesh of its own, together with
-// the inside faces of the canopy frame, and those get the grey material only
-// while the cockpit camera is drawing.
-//
-// The cockpit tub is the fuselage triangles lying entirely inside this box,
-// meters in the aircraft frame (x right, y forward, z up, from the centre of
-// gravity): under the canopy, and above the intake and nose gear structure
-// below the cockpit floor. The cockpit rim the canopy rails sit on is left as
-// it is, like the rails themselves.
-const COCKPIT_TUB_BOX = { maxAbsX: 0.46, minY: 4.05, maxY: 6.65, minZ: -0.5, maxZ: 0.75 }
-const COCKPIT_INTERIOR_COLOUR = 0x7a7a7a
-
-const cockpitInteriorMaterial = new MeshPhongMaterial({
-  color: COCKPIT_INTERIOR_COLOUR,
-  specular: 0x111111,
-  shininess: 10,
-})
 
 // Looking ahead from the cockpit, the interior in view - the glare shield
 // and the cockpit rim below the HUD - is shown in an even grey, without the
@@ -1432,11 +1160,6 @@ const cockpitInteriorMaterial = new MeshPhongMaterial({
 // where it has gone out of sight, so the change back to the shaded grey
 // isn't seen.
 const COCKPIT_INTERIOR_FLAT_YAW = 90
-const COCKPIT_INTERIOR_FLAT_COLOUR = new Color(COCKPIT_INTERIOR_COLOUR)
-const cockpitInteriorFlatMaterial = new MeshBasicMaterial({ color: COCKPIT_INTERIOR_COLOUR })
-
-// the cockpit interior parts, with the material each has in the exterior views
-let cockpitInteriorParts = []
 
 // gives the cockpit interior its grey for the cockpit view - unshaded with
 // the pilot looking ahead - or its own material back for the exterior views
@@ -1445,45 +1168,8 @@ function paintCockpitInterior(inCockpit, lookingAhead) {
     part.mesh.material = !inCockpit
       ? part.exteriorMaterial
       : lookingAhead
-        ? (part.flatMaterial ?? cockpitInteriorFlatMaterial)
-        : (part.cockpitMaterial ?? cockpitInteriorMaterial)
-  }
-}
-
-function colourCockpitInterior(object) {
-  object.updateMatrix()
-  const frameOf = (mesh) => {
-    mesh.updateMatrix()
-    return object.matrix.clone().multiply(mesh.matrix)
-  }
-
-  const fuselage = object.getObjectByName("LOD0")
-  if (fuselage) {
-    const box = COCKPIT_TUB_BOX
-    const inTub = (vertices) =>
-      vertices.every(
-        (p) => Math.abs(p.x) <= box.maxAbsX && p.y >= box.minY && p.y <= box.maxY && p.z >= box.minZ && p.z <= box.maxZ,
-      )
-
-    const tub = splitOffTriangles(fuselage, "Cockpit_Interior", frameOf(fuselage), inTub)
-    if (tub) cockpitInteriorParts.push({ mesh: tub, exteriorMaterial: tub.material })
-  }
-
-  // the canopy frame's inside faces are the ones facing the pilot's eyes
-  const canopyFrame = object.getObjectByName("Canopy01")
-  if (canopyFrame) {
-    const triangle = new Triangle()
-    const normal = new Vector3()
-    const centre = new Vector3()
-    const facingEye = (vertices) => {
-      triangle.set(...vertices)
-      triangle.getNormal(normal)
-      triangle.getMidpoint(centre)
-      return normal.dot(centre.sub(EYE_POSITION).negate()) > 0
-    }
-
-    const inside = splitOffTriangles(canopyFrame, "Canopy_Inside", frameOf(canopyFrame), facingEye)
-    if (inside) cockpitInteriorParts.push({ mesh: inside, exteriorMaterial: inside.material })
+        ? part.flatMaterial
+        : part.cockpitMaterial
   }
 }
 
@@ -1503,8 +1189,8 @@ function placeHudAboveAirframe(object) {
   let highest = -Infinity
 
   object.traverse((mesh) => {
-    if (!mesh.isMesh || COCKPIT_HIDDEN_PARTS.includes(mesh.name)) return
-    // nor anything inside a part hidden there
+    // not the parts hidden in the cockpit view, nor anything inside them
+    if (!mesh.isMesh) return
     for (let parent = mesh; parent; parent = parent.parent) if (cockpitHiddenParts.includes(parent)) return
     if ([mesh.material].flat().some((material) => material.name === "Glass")) return
 
@@ -1525,25 +1211,6 @@ function placeHudAboveAirframe(object) {
   console.log("HUD glass bottom edge at %s degrees", (highest * MathUtils.RAD2DEG + HUD_CLEARANCE).toFixed(1))
 }
 
-// The fuselage around the canopy - every triangle entirely within this
-// distance of the pilot's eyes, meters - is moved into a mesh of its own,
-// Cockpit_Surroundings, so the cockpit view can switch off its self-shadows
-// (see COCKPIT_UNSHADOWED_PARTS). Beyond it, a shadow map texel only covers
-// a few pixels, and the self-shadows hold still.
-const COCKPIT_UNSHADOWED_RADIUS = 2.5
-
-function separateCockpitSurroundings(object) {
-  const fuselage = object.getObjectByName("LOD0")
-  if (!fuselage) return
-
-  object.updateMatrix()
-  fuselage.updateMatrix()
-  const frame = object.matrix.clone().multiply(fuselage.matrix)
-
-  const nearEye = (vertices) => vertices.every((p) => p.distanceTo(EYE_POSITION) <= COCKPIT_UNSHADOWED_RADIUS)
-  splitOffTriangles(fuselage, "Cockpit_Surroundings", frame, nearEye)
-}
-
 // the canopy glass is see-through, so it receives shadows but doesn't cast
 // any - otherwise the whole cockpit would sit in the canopy's shadow
 function enableShadows(object) {
@@ -1552,37 +1219,6 @@ function enableShadows(object) {
       const materials = Array.isArray(child.material) ? child.material : [child.material]
       child.castShadow = !materials.some((material) => material.transparent || material.name === "Glass")
       child.receiveShadow = true
-    }
-  })
-}
-
-// f16-5's own metal/strut material comes in noticeably lighter than the
-// OBJ's body skin - average sampled color (123, 126, 125) against the OBJ's
-// (70, 70, 74) - so it reads as mismatched silver against the OBJ's darker
-// gray. Tinting is a plain multiply of MeshStandardMaterial's color against
-// its base color texture, so this ratio pulls the gear texture towards that
-// darker shade without touching the texture itself - pulling it all the way
-// to the OBJ's own average came out too dark in practice (a dark surface
-// with the glTF's default roughness still throws a bright specular
-// highlight, which reads worse than just being lighter), so this only goes
-// about a third of the way there. Roughness is also pushed towards fully
-// matte, to kill that shine on the struts and wheels - real gear legs are
-// unpolished metal, not chrome. Only the textured material is touched - the
-// glass material (used nowhere on the visible gear/door parts) has no map
-// and is left alone.
-const GEAR_TINT = [0.85, 0.84, 0.86]
-const GEAR_ROUGHNESS = 0.95
-
-function tintGearToMatchBody(object) {
-  const tint = new Color(...GEAR_TINT).convertSRGBToLinear()
-  const tinted = new Set()
-
-  object.traverse((child) => {
-    if (child.isMesh && child.material?.map && !tinted.has(child.material)) {
-      child.material.color.copy(tint)
-      child.material.roughness = GEAR_ROUGHNESS
-      child.material.metalness = 0
-      tinted.add(child.material)
     }
   })
 }
