@@ -1,6 +1,8 @@
 import {
   AdditiveBlending,
   AnimationMixer,
+  BoxGeometry,
+  BufferAttribute,
   Color,
   CylinderGeometry,
   DoubleSide,
@@ -178,6 +180,22 @@ const COCKPIT_UNSHADOWED = ["Cockpit002", "Control", "Canopy_mesh", "Canopy001"]
 // the cockpit's own parts, shown unshaded from the cockpit - see
 // paintCockpitInterior in index.js
 const COCKPIT_INTERIOR = ["Cockpit002", "Control"]
+
+// The real F-16's HUD sits on a solid housing, with the up-front controls
+// on its face right under the combiner glass, and between them they hide the
+// top of the nose straight ahead. The model's HUD is only a frame round its
+// glass, hidden from the cockpit anyway (see COCKPIT_HIDDEN), so the nose
+// showed through below the simulator's own HUD. This box stands in for the
+// housing, from the cockpit only. Its top front edge is on the line over the
+// nose - OVER_NOSE degrees down from the eye, measured off the model - so the
+// HUD glass, placed just above the airframe, still sits right on top of it
+// (see placeHudAboveAirframe in index.js). The size is an estimate from
+// photos, in meters ahead of the eye and either side of the centreline.
+const OVER_NOSE = 15.2 // degrees
+const HUD_HOUSING = { front: 0.62, back: 0.42, halfWidth: 0.12, bottom: 0.55 }
+const HUD_HOUSING_TINT = new Color(0x2c2c2c)
+// how much each face is darkened, so its edges show in the even tint
+const HUD_HOUSING_SHADES = { top: 1, back: 0.75, side: 0.6, other: 0.5 }
 
 function find(root, name, predicate = () => true) {
   let found = null
@@ -533,11 +551,37 @@ class F16Rig {
       })
     })
 
+    this.cockpitOnlyParts = [this.hudHousing(f16)]
+
     this.actuators = null
     this.rotation = new Quaternion()
     this.toLocal = new Matrix4()
     this.from = new Vector3()
     this.to = new Vector3()
+  }
+
+  // see HUD_HOUSING
+  hudHousing(f16) {
+    const { front, back, halfWidth, bottom } = HUD_HOUSING
+    const top = EYE_POSITION.z - front * Math.tan(OVER_NOSE * MathUtils.DEG2RAD)
+    const geometry = new BoxGeometry(2 * halfWidth, front - back, top - bottom)
+
+    // BoxGeometry's faces, in order: +x, -x, +y, -y, +z, -z - four
+    // vertices each
+    const faces = ["side", "side", "other", "back", "top", "other"]
+    const colors = []
+    for (const face of faces) for (let i = 0; i < 4; i++) colors.push(...new Array(3).fill(HUD_HOUSING_SHADES[face]))
+    geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3))
+
+    const material = new MeshBasicMaterial({ color: HUD_HOUSING_TINT, vertexColors: true })
+    const housing = new Mesh(geometry, material)
+    housing.name = "HudHousing"
+    housing.position.set(0, EYE_POSITION.y + (front + back) / 2, (top + bottom) / 2)
+    housing.visible = false
+    f16.add(housing)
+
+    this.cockpitInteriorParts.push({ mesh: housing, exteriorMaterial: material, cockpitMaterial: material, flatMaterial: material, flatTint: HUD_HOUSING_TINT })
+    return housing
   }
 
   // see INTAKE and NOZZLE

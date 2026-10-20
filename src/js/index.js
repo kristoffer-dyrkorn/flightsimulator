@@ -312,12 +312,13 @@ aircraftScene.add(f16)
 
 // Parts of the model hidden in the cockpit view, parts that don't receive
 // the aircraft's own shadows there (so close to the eye that the shadows on
-// them flicker), and the cockpit interior's parts with the materials they
-// are drawn with there and outside - all from the model, see
-// graphics/f16Model.js
+// them flicker), the cockpit interior's parts with the materials they are
+// drawn with there and outside, and parts shown from the cockpit only - all
+// from the model, see graphics/f16Model.js
 let cockpitHiddenParts = []
 let cockpitUnshadowedParts = []
 let cockpitInteriorParts = []
+let cockpitOnlyParts = []
 
 const hudGeometry = new PlaneGeometry(1, 1)
 const hudMaterial = new MeshBasicMaterial({ color: 0xffff00 })
@@ -1050,6 +1051,7 @@ function drawScene(currentFrametime) {
 
   const inCockpit = currentCamera === 0
   for (const part of cockpitHiddenParts) part.visible = !inCockpit
+  for (const part of cockpitOnlyParts) part.visible = inCockpit
   for (const part of cockpitUnshadowedParts) part.receiveShadow = !inCockpit
   paintCockpitInterior(inCockpit, inCockpit && Math.abs(wrapDegrees(cockpitLook.yaw)) < COCKPIT_INTERIOR_FLAT_YAW)
 
@@ -1147,6 +1149,7 @@ function loadAircraftModel(f16) {
     cockpitHiddenParts = rig.cockpitHiddenParts
     cockpitUnshadowedParts = rig.cockpitUnshadowedParts
     cockpitInteriorParts = rig.cockpitInteriorParts
+    cockpitOnlyParts = rig.cockpitOnlyParts
     placeHudAboveAirframe(rig.object)
   })
 }
