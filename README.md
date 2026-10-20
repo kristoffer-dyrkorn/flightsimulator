@@ -156,5 +156,6 @@ Extra startup parameters:
 - Altitude (in metres) can be given using the parameter `a`. Default is 1500 metres (5000 ft).
 - Start direction (compass angle) can be provided by `c`. Default is 0 degrees, ie due north.
 - Time of day, which sets where the sun is, can be given using `time`, for example `2026-06-21T22:30` (in the browser's own time zone) or `2026-06-21T22:30+02:00`. Default is the current time, kept within daylight: no earlier than dawn, and no later than an hour before dusk.
+- The aircraft model is the one in `src/f16-3`. The earlier model can be used instead with the parameter `oldmodel`.
 
 Example: https://kristoffer-dyrkorn.github.io/flightsimulator/?n=6981000&e=110000&a=1000&c=270

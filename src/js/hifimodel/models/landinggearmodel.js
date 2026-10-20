@@ -286,8 +286,10 @@ export default class LandingGearModel {
        in contact with it before the caller has set a real value. */
     this.groundAlt = -1e6
 
-    /* whether any leg was on the ground at the last update */
+    /* whether any leg was on the ground at the last update, and whether all
+       of them were */
     this.weightOnWheels = false
+    this.weightOnAllWheels = false
   }
 
   /**
@@ -339,8 +341,11 @@ export default class LandingGearModel {
     let N = 0
 
     this.weightOnWheels = false
+    this.weightOnAllWheels = false
 
     if (gear <= 0) return { X, Y, Z, L, M, N }
+
+    let legsDown = 0
 
     for (const leg of Object.values(LEGS)) {
       // earth-frame "down" component of this leg's fixed body-frame offset
@@ -354,6 +359,7 @@ export default class LandingGearModel {
       if (penetration <= 0) continue
 
       this.weightOnWheels = true
+      if (++legsDown === Object.keys(LEGS).length) this.weightOnAllWheels = true
 
       // velocity of this point on the rigid body = CG velocity + (angular
       // rate) x (offset) - the standard rigid-body point-velocity relation,

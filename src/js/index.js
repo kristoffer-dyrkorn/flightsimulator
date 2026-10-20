@@ -42,6 +42,8 @@ import { splitOffTriangles } from "./graphics/splitMesh.js"
 import GroundShadow from "./graphics/GroundShadow.js"
 import ControlSurfaceRig from "./graphics/controlSurfaceRig.js"
 import LandingGearRig from "./graphics/landingGearRig.js"
+import { loadF16Model, EYE_POSITION as F16_EYE_POSITION } from "./graphics/f16Model.js"
+import { MeshoptDecoder } from "./externals/meshopt_decoder.module"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
@@ -296,7 +298,12 @@ const EXTERNAL_CAMERA_SLEW_STEP = 4.8
 // are. A real pilot sets the seat height against a HUD test pattern to put
 // their eyes at the HUD's design eye point, the one place its symbology
 // lines up with the world outside.
-const EYE_POSITION = new Vector3(0, 5.25, 0.88)
+// The aircraft model: the one in f16-3 (see graphics/f16Model.js), or with
+// the `oldmodel` url parameter the earlier one, f16/f16.obj with its gear
+// from f16/gear.glb. The eye point above is that earlier model's - the
+// f16-3 model has its own, see F16_EYE_POSITION.
+const OLD_MODEL = new URL(document.location).searchParams.has("oldmodel")
+const EYE_POSITION = OLD_MODEL ? new Vector3(0, 5.25, 0.88) : F16_EYE_POSITION.clone()
 
 // Where the pilot is looking, from the cockpit: degrees of yaw from straight
 // ahead, positive to the left. The look keys set the target, and the view
@@ -536,6 +543,11 @@ function updateSun() {
 sky.onUpdate = () => {
   Tile.light.setRGB(...sky.groundLight)
   cockpitInteriorFlatMaterial.color.copy(COCKPIT_INTERIOR_FLAT_COLOUR).multiplyScalar(luminance(sky.groundLight))
+  for (const part of cockpitInteriorParts) {
+    if (!part.flatMaterial) continue
+    if (part.flatTint) part.flatMaterial.color.copy(part.flatTint).multiplyScalar(luminance(sky.groundLight))
+    else part.flatMaterial.color.setScalar(luminance(sky.groundLight))
+  }
   updateHorizonFog(sky.horizonColors, sky.sunDirection)
 
   const daylight = luminance(sky.referenceGroundLight)
@@ -970,6 +982,7 @@ function drawScene(currentFrametime) {
       airplaneState,
       PHYSICS_STEP,
       f16simulation.landingGearModel.weightOnWheels,
+      f16simulation.landingGearModel.weightOnAllWheels,
     )
     controlActuators.update(flightControlSystem.commands, PHYSICS_STEP)
 
@@ -1057,6 +1070,7 @@ function drawScene(currentFrametime) {
 
   terrain.update(camera, showWireFrame)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
+  landingGearRig?.setEngine?.(renderState.pow, sky.adaptation)
 
   renderer.clear()
   renderer.render(scene, cameras[currentCamera])
@@ -1210,6 +1224,21 @@ const MAIN_GEAR_OFFSET = [0, -0.04, -0.02]
 const MAIN_GEAR_TRACK_OFFSET = 0.07
 
 function loadAircraftModel(f16) {
+  if (!OLD_MODEL) {
+    // the transcoder needs to know the renderer before any texture arrives
+    Tile.ktx2Loader.detectSupport(renderer)
+    loadF16Model(f16, Tile.ktx2Loader, MeshoptDecoder, (rig) => {
+      enableShadows(rig.object)
+      controlSurfaceRig = { update: (actuators) => rig.setControls(actuators) }
+      landingGearRig = rig
+      cockpitHiddenParts = rig.cockpitHiddenParts
+      cockpitUnshadowedParts = rig.cockpitUnshadowedParts
+      cockpitInteriorParts = rig.cockpitInteriorParts
+      placeHudAboveAirframe(rig.object)
+    })
+    return
+  }
+
   const manager = new LoadingManager()
   new MTLLoader(manager).setPath("f16/").load("f16.mtl", (materials) => {
     materials.preload()
@@ -1412,8 +1441,12 @@ let cockpitInteriorParts = []
 // gives the cockpit interior its grey for the cockpit view - unshaded with
 // the pilot looking ahead - or its own material back for the exterior views
 function paintCockpitInterior(inCockpit, lookingAhead) {
-  for (const { mesh, exteriorMaterial } of cockpitInteriorParts) {
-    mesh.material = !inCockpit ? exteriorMaterial : lookingAhead ? cockpitInteriorFlatMaterial : cockpitInteriorMaterial
+  for (const part of cockpitInteriorParts) {
+    part.mesh.material = !inCockpit
+      ? part.exteriorMaterial
+      : lookingAhead
+        ? (part.flatMaterial ?? cockpitInteriorFlatMaterial)
+        : (part.cockpitMaterial ?? cockpitInteriorMaterial)
   }
 }
 
@@ -1471,12 +1504,17 @@ function placeHudAboveAirframe(object) {
 
   object.traverse((mesh) => {
     if (!mesh.isMesh || COCKPIT_HIDDEN_PARTS.includes(mesh.name)) return
+    // nor anything inside a part hidden there
+    for (let parent = mesh; parent; parent = parent.parent) if (cockpitHiddenParts.includes(parent)) return
     if ([mesh.material].flat().some((material) => material.name === "Glass")) return
 
     const frame = toAircraft.clone().multiply(mesh.matrixWorld)
     const position = mesh.geometry.attributes.position
     for (let i = 0; i < position.count; i++) {
-      point.fromBufferAttribute(position, i).applyMatrix4(frame).sub(EYE_POSITION)
+      // a skinned mesh's vertices are where its bones put them
+      point.fromBufferAttribute(position, i)
+      if (mesh.isSkinnedMesh) mesh.applyBoneTransform(i, point)
+      point.applyMatrix4(frame).sub(EYE_POSITION)
       if (point.y < LOOK_AHEAD_MIN || Math.abs(Math.atan2(point.x, point.y)) > halfWidth) continue
       highest = Math.max(highest, Math.atan2(point.z, Math.hypot(point.x, point.y)))
     }

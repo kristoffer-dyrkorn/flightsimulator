@@ -47,10 +47,10 @@ SimulationConstants.LEF_MIN = 0
 SimulationConstants.LEF_MAX = 25
 
 /* Trailing edge flaps - the flaperons lowered together (see flaperons.js).
-   The flight control system schedules them, there's no flap lever: fully
-   down with the gear handle down, and with it up, fully down below about
-   240 KCAS and retracting to fully up by about 370 KCAS. That schedule is
-   from pilot and training material, not from the flight manual itself.
+   The flight control system schedules them, there's no flap lever: up with
+   the gear handle up, and with it down, fully down below about 240 KCAS and
+   retracting to fully up by about 370 KCAS. That schedule is from pilot and
+   training material, not from the flight manual itself.
 
    The NASA wind tunnel data behind the rest of the aerodynamics (TP-1538)
    has nothing for the flaperons lowered together, so the lift and drag they

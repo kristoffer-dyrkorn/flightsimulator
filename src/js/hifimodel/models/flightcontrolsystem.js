@@ -287,8 +287,9 @@ export default class FlightControlSystem {
    * @param x      current aircraft state
    * @param dt     seconds since the last call
    * @param weightOnWheels  true while any wheel is on the ground
+   * @param weightOnAllWheels  true while all three are
    */
-  update(input, x, dt, weightOnWheels = false) {
+  update(input, x, dt, weightOnWheels = false, weightOnAllWheels = false) {
     /* the angle of attack the aircraft's vane reads, against the air - the
        limiter and the flap schedule are about what the wing is doing, and in
        a wind that isn't the angle against the velocity over the ground */
@@ -529,23 +530,23 @@ export default class FlightControlSystem {
       SimulationConstants.LEF_MAX,
     )
 
-    /* Trailing edge flaps, also scheduled rather than flown: fully down with
-       the gear handle down, and otherwise down at low speed and retracting
-       as it builds - see TEF_MAX. The schedule is on calibrated airspeed,
-       which at these speeds is the equivalent airspeed dynamic pressure
-       works out to. */
+    /* Trailing edge flaps, also scheduled rather than flown, as in the real
+       aircraft: up with the gear handle up, and with it down, down at low
+       speed and retracting as it builds - see TEF_MAX. The schedule is on
+       calibrated airspeed, which at these speeds is the equivalent airspeed
+       dynamic pressure works out to. */
     const kcas =
       Math.sqrt((2 * this.atmosphericModel.qbar) / SimulationConstants.SEA_LEVEL_DENSITY) * SimulationConstants.FEET_PER_SECOND_TO_KNOTS
     this.commands.tef =
       input.gear > 0
-        ? SimulationConstants.TEF_MAX
-        : SimulationConstants.TEF_MAX *
+        ? SimulationConstants.TEF_MAX *
           limit(
             (SimulationConstants.TEF_UP_ABOVE_KCAS - kcas) /
               (SimulationConstants.TEF_UP_ABOVE_KCAS - SimulationConstants.TEF_FULL_BELOW_KCAS),
             0,
             1,
           )
+        : 0
 
     this.commands.throttle = input.throttle
 
@@ -556,10 +557,16 @@ export default class FlightControlSystem {
        own lever position (input.speedbrake) is left alone - only what gets
        commanded to the actuator is capped, so nothing has to happen when
        the gear moves except this limit sliding, exactly as if the pilot
-       were still holding the board wherever they put it. */
-    const speedbrakeMax =
-      SimulationConstants.SPEEDBRAKE_MAX +
-      (SimulationConstants.SPEEDBRAKE_MAX_GEAR_DOWN - SimulationConstants.SPEEDBRAKE_MAX) * input.gear
+       were still holding the board wherever they put it.
+
+       The cap is there to keep the lower boards off the runway at a high
+       angle of attack touchdown, so as in the real aircraft it lifts once
+       the aircraft is down - with weight on all three wheels - and the
+       boards open fully again for the landing roll. */
+    const speedbrakeMax = weightOnAllWheels
+      ? SimulationConstants.SPEEDBRAKE_MAX
+      : SimulationConstants.SPEEDBRAKE_MAX +
+        (SimulationConstants.SPEEDBRAKE_MAX_GEAR_DOWN - SimulationConstants.SPEEDBRAKE_MAX) * input.gear
     this.commands.speedbrake = limit(input.speedbrake, SimulationConstants.SPEEDBRAKE_MIN, speedbrakeMax)
     this.commands.gear = input.gear
 
