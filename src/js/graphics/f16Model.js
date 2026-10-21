@@ -1,11 +1,11 @@
 import {
   AdditiveBlending,
   AnimationMixer,
-  BoxGeometry,
-  BufferAttribute,
+  Box3,
   Color,
   CylinderGeometry,
   DoubleSide,
+  Matrix3,
   Matrix4,
   Mesh,
   MeshBasicMaterial,
@@ -181,21 +181,77 @@ const COCKPIT_UNSHADOWED = ["Cockpit002", "Control", "Canopy_mesh", "Canopy001"]
 // paintCockpitInterior in index.js
 const COCKPIT_INTERIOR = ["Cockpit002", "Control"]
 
-// The real F-16's HUD sits on a solid housing, with the up-front controls
-// on its face right under the combiner glass, and between them they hide the
-// top of the nose straight ahead. The model's HUD is only a frame round its
-// glass, hidden from the cockpit anyway (see COCKPIT_HIDDEN), so the nose
-// showed through below the simulator's own HUD. This box stands in for the
-// housing, from the cockpit only. Its top front edge is on the line over the
-// nose - OVER_NOSE degrees down from the eye, measured off the model - so the
-// HUD glass, placed just above the airframe, still sits right on top of it
-// (see placeHudAboveAirframe in index.js). The size is an estimate from
-// photos, in meters ahead of the eye and either side of the centreline.
+// From the cockpit the airframe is drawn twice: first with the terrain's
+// camera, whose near plane is 1 m out, then again close up (see drawScene
+// in index.js). The second time, only the parts reaching closer than this
+// to the eye - which the first pass clipped - need drawing in full; see
+// setCockpitNearPass.
+const COCKPIT_NEAR_REACH = 1.1 // m
+
+// the model's cockpit tub, and how far ahead of the eye, in meters, its
+// part hidden in the cockpit view starts - see COCKPIT_MODEL
+const COCKPIT_TUB = ["Cockpit002"]
+const TUB_PANEL_FROM = 0.2
+
+// The model's cockpit is a plain black tub, with the top of the nose
+// showing over it below the HUD - while in the real F-16 the HUD sits on the
+// up-front controls, with the glare shield high on either side and the
+// instrument panel below, and the nose doesn't show at all. So from the
+// cockpit, a model of the real front panel stands in for it: "F16C Block
+// 50/52 + Cockpit" by graphXDoses (sketchfab.com/3d-models/
+// f16c-block-5052-cockpit-83fb3b74c97d46febda2813331de168d, CC BY 4.0) -
+// the HUD, the up-front controls, the glare shield, the instrument panel
+// and the centre pedestal, in one mesh with a baked texture.
+//
+// In its own frame, as loaded, x is forward, y up and z to the right, in
+// units of about 0.42 m: SCALE makes its displays the real ones' 0.16 m
+// across, and that puts the front of its glare shield right on the
+// airframe's own. ANCHOR is the top of the up-front controls' face, on the
+// centreline, which goes ANCHOR_DISTANCE ahead of the eye and OVER_NOSE
+// degrees down - on the line over the nose, which the simulator's own HUD
+// glass sits right on top of (see placeHudAboveAirframe in index.js). Its
+// HUD - the glass, its frame and the top of its housing, with the AOA
+// indexer and the refuelling status lights either side of it: all
+// triangles reaching up into HUD (model frame) - is cut out: the simulator
+// draws its own HUD there - and so are the remains of it all: the parts of
+// the mesh, each in one piece, that lie wholly inside one of REMAINS.
+// What is left is then raised or lowered until its top, straight ahead -
+// NOSE_HALF_WIDTH degrees either side, where the nose is - is just on the
+// line over the nose, OVER_NOSE degrees down - PANEL_OVER_NOSE above it - so
+// it only just hides it.
+const COCKPIT_MODEL = {
+  url: "f16/cockpit.glb",
+  scale: 2.4,
+  anchor: new Vector3(1.035, 1.163, 0.857),
+  hud: { min: new Vector3(-Infinity, 1.165, 0.79), max: new Vector3(1.17, Infinity, 0.925) },
+  // the pieces left of the HUD's mounting and what stood beside it - the
+  // AOA indexer's and status lights' bases and cables, and the feet of the
+  // HUD frame's posts, either side of the up-front controls' buttons - each
+  // a part of its own, lying wholly inside one of these
+  remains: [
+    new Box3(new Vector3(1.06, 1.12, 0.785), new Vector3(1.22, Infinity, 0.93)),
+    new Box3(new Vector3(1.02, 1.12, 0.81), new Vector3(1.15, Infinity, 0.826)),
+    new Box3(new Vector3(1.02, 1.12, 0.888), new Vector3(1.15, Infinity, 0.905)),
+  ],
+}
+// the nose seen from the eye, half its width
+const NOSE_HALF_WIDTH = 9 // degrees
+// how far above the line over the nose the panel's top is, so none of the
+// nose shows over it
+const PANEL_OVER_NOSE = 0.2 // degrees
 const OVER_NOSE = 15.2 // degrees
-const HUD_HOUSING = { front: 0.62, back: 0.42, halfWidth: 0.12, bottom: 0.55 }
-const HUD_HOUSING_TINT = new Color(0x2c2c2c)
-// how much each face is darkened, so its edges show in the even tint
-const HUD_HOUSING_SHADES = { top: 1, back: 0.75, side: 0.6, other: 0.5 }
+const ANCHOR_DISTANCE = 0.43 // m
+// How the panel is lit - see cockpitPanelMaterial: always as the cockpit
+// interior's daylight is at noon (on midsummer's day, in index.js's terms
+// - luminance(sky.groundLight)), a fill from all round, and direct light,
+// by how square on to it a surface is, from where the sun is at noon seen
+// from an aircraft heading north: behind it, 50 degrees up (aircraft frame).
+const COCKPIT_PANEL_BRIGHTNESS = 1.12
+const COCKPIT_PANEL_FILL = 0.55
+const COCKPIT_PANEL_SUN = 0.6
+const COCKPIT_PANEL_LIGHT = new Vector3(0, -Math.cos(50 * MathUtils.DEG2RAD), Math.sin(50 * MathUtils.DEG2RAD))
+// the model's frame to the aircraft's: its x, y and z go to y, z and x
+const COCKPIT_MODEL_AXES = new Matrix4().set(0, 0, 1, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1)
 
 function find(root, name, predicate = () => true) {
   let found = null
@@ -223,6 +279,157 @@ export function loadF16Model(f16, ktx2Loader, decoder, onLoad) {
       () => {},
       (error) => console.log("Could not load the F-16 model: " + error),
     )
+}
+
+// The cockpit panel model's material: its texture, in plain white light of
+// a fixed strength from a fixed direction on the aircraft - so it looks the
+// same at any time of day and on any heading, as it does at noon, without
+// the sun's colour or shadows on it. toAircraft turns the mesh's normals
+// into the aircraft frame.
+function cockpitPanelMaterial(map, side, toAircraft) {
+  const light = `vec3(${COCKPIT_PANEL_LIGHT.toArray().map((n) => n.toFixed(4)).join(", ")})`
+  return new ShaderMaterial({
+    side,
+    uniforms: { map: { value: map }, toAircraft: { value: toAircraft } },
+    vertexShader: `
+      uniform mat3 toAircraft;
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      void main() {
+        vUv = uv;
+        vNormal = toAircraft * normal;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }`,
+    fragmentShader: `
+      uniform sampler2D map;
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      void main() {
+        vec3 n = normalize(vNormal) * (gl_FrontFacing ? 1.0 : -1.0);
+        float direct = max(dot(n, ${light}), 0.0);
+        float light = ${COCKPIT_PANEL_BRIGHTNESS.toFixed(4)} * (${COCKPIT_PANEL_FILL.toFixed(4)} + ${COCKPIT_PANEL_SUN.toFixed(4)} * direct);
+        gl_FragColor = vec4(texture2D(map, vUv).rgb * light, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  })
+}
+
+// whether any of a mesh's vertices, as posed, is within reach of point
+// (both in the world frame)
+function reachesWithin(mesh, point, reach) {
+  const position = mesh.geometry.attributes.position
+  const v = new Vector3()
+  const reachSquared = reach * reach
+  for (let i = 0; i < position.count; i++) {
+    v.fromBufferAttribute(position, i)
+    if (mesh.isSkinnedMesh) mesh.applyBoneTransform(i, v)
+    if (v.applyMatrix4(mesh.matrixWorld).distanceToSquared(point) < reachSquared) return true
+  }
+  return false
+}
+
+// a material that only writes depth, facing the same way as material -
+// one for each way (see setCockpitNearPass)
+const DEPTH_ONLY = new Map()
+function depthOnly(material) {
+  if (!DEPTH_ONLY.has(material.side)) DEPTH_ONLY.set(material.side, new MeshBasicMaterial({ colorWrite: false, side: material.side }))
+  return DEPTH_ONLY.get(material.side)
+}
+
+// Drops the pieces of a mesh - its parts connected by shared corners - that
+// lie wholly inside box, in the frame of the model's root (as cutOut)
+function cutPieces(mesh, box) {
+  const g = mesh.geometry
+  const position = g.attributes.position
+  const index = g.index.array
+  // corners in the same place are one, whether or not they share a vertex
+  const corners = new Map()
+  const corner = new Int32Array(position.count)
+  const v = new Vector3()
+  for (let i = 0; i < position.count; i++) {
+    v.fromBufferAttribute(position, i)
+    const key = `${Math.round(v.x * 1e5)},${Math.round(v.y * 1e5)},${Math.round(v.z * 1e5)}`
+    if (!corners.has(key)) corners.set(key, corners.size)
+    corner[i] = corners.get(key)
+  }
+  const parent = Int32Array.from({ length: corners.size }, (_, i) => i)
+  const root = (a) => {
+    while (parent[a] !== a) a = parent[a] = parent[parent[a]]
+    return a
+  }
+  for (let t = 0; t < index.length; t += 3) {
+    const a = root(corner[index[t]])
+    parent[root(corner[index[t + 1]])] = a
+    parent[root(corner[index[t + 2]])] = a
+  }
+  // a piece is inside if all its corners are
+  const outside = new Set()
+  for (let i = 0; i < position.count; i++) {
+    if (!box.containsPoint(v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))) outside.add(root(corner[i]))
+  }
+  const kept = []
+  for (let t = 0; t < index.length; t += 3) {
+    if (outside.has(root(corner[index[t]]))) kept.push(index[t], index[t + 1], index[t + 2])
+  }
+  g.setIndex(kept)
+}
+
+// Moves the triangles of a mesh whose centre, in the aircraft frame, take
+// says to take, to a copy of the mesh of their own, alongside it - and
+// returns the copy, or nothing if there were none or the mesh's triangles
+// are in groups (for more than one material).
+function splitOff(mesh, toAircraft, take) {
+  const g = mesh.geometry
+  if (g.groups.length > 0) return null
+  const position = g.attributes.position
+  const index = g.index ? g.index.array : Array.from({ length: position.count }, (_, i) => i)
+  const frame = new Matrix4().multiplyMatrices(toAircraft, mesh.matrixWorld)
+  const corner = new Vector3()
+  const centre = new Vector3()
+  const [taken, kept] = [[], []]
+  for (let t = 0; t < index.length; t += 3) {
+    centre.set(0, 0, 0)
+    for (let k = 0; k < 3; k++) {
+      corner.fromBufferAttribute(position, index[t + k])
+      if (mesh.isSkinnedMesh) mesh.applyBoneTransform(index[t + k], corner)
+      centre.add(corner.applyMatrix4(frame))
+    }
+    ;(take(centre.divideScalar(3)) ? taken : kept).push(index[t], index[t + 1], index[t + 2])
+  }
+  if (taken.length === 0) return null
+
+  const copy = mesh.clone()
+  copy.geometry = g.clone()
+  copy.geometry.setIndex(taken)
+  copy.name = mesh.name + "_ahead"
+  g.setIndex(kept)
+  mesh.parent.add(copy)
+  return copy
+}
+
+// Drops a mesh's triangles that cut says to, given their centre and their
+// highest corner (most y) in the frame of the model's root (its
+// matrixWorld, before the model is placed anywhere)
+function cutOut(mesh, cut) {
+  const g = mesh.geometry
+  const position = g.attributes.position
+  const index = g.index ? g.index.array : Array.from({ length: position.count }, (_, i) => i)
+  const kept = []
+  const centre = new Vector3()
+  const corner = new Vector3()
+  const top = new Vector3()
+  for (let t = 0; t < index.length; t += 3) {
+    centre.set(0, 0, 0)
+    top.set(0, -Infinity, 0)
+    for (let k = 0; k < 3; k++) {
+      corner.fromBufferAttribute(position, index[t + k]).applyMatrix4(mesh.matrixWorld)
+      centre.add(corner)
+      if (corner.y > top.y) top.copy(corner)
+    }
+    if (!cut(centre.divideScalar(3), top)) kept.push(index[t], index[t + 1], index[t + 2])
+  }
+  g.setIndex(kept)
 }
 
 /*
@@ -525,8 +732,18 @@ class F16Rig {
       for (const object of objects) object.traverse((o) => o.isMesh && meshes.push(o))
       return meshes
     }
-    this.cockpitUnshadowedParts = meshesOf(parts(COCKPIT_UNSHADOWED))
-    this.cockpitInteriorParts = meshesOf(parts(COCKPIT_INTERIOR)).map((mesh) => ({
+
+    // the cockpit tub ahead of the pilot, where the front panel model takes
+    // its place - see COCKPIT_MODEL and TUB_PANEL_FROM
+    model.parent.updateMatrixWorld(true)
+    const toAircraft = new Matrix4().copy(model.parent.matrixWorld).invert()
+    const tubAhead = meshesOf(parts(COCKPIT_TUB))
+      .map((mesh) => splitOff(mesh, toAircraft, (centre) => centre.y > EYE_POSITION.y + TUB_PANEL_FROM))
+      .filter(Boolean)
+    this.cockpitHiddenParts.push(...tubAhead)
+
+    this.cockpitUnshadowedParts = [...meshesOf(parts(COCKPIT_UNSHADOWED)), ...tubAhead]
+    this.cockpitInteriorParts = [...meshesOf(parts(COCKPIT_INTERIOR)), ...tubAhead].map((mesh) => ({
       mesh,
       exteriorMaterial: mesh.material,
       cockpitMaterial: mesh.material,
@@ -551,7 +768,19 @@ class F16Rig {
       })
     })
 
-    this.cockpitOnlyParts = [this.hudHousing(f16)]
+    this.cockpitOnlyParts = []
+    this.loadCockpitModel(f16)
+
+    // the parts reaching within COCKPIT_NEAR_REACH of the eye, and the rest
+    // - see setCockpitNearPass
+    this.nearParts = []
+    this.farParts = []
+    f16.updateMatrixWorld(true)
+    const eye = EYE_POSITION.clone().applyMatrix4(f16.matrixWorld)
+    this.object.traverse((mesh) => {
+      if (mesh.isMesh) (reachesWithin(mesh, eye, COCKPIT_NEAR_REACH) ? this.nearParts : this.farParts).push(mesh)
+    })
+    this.nearPass = null
 
     this.actuators = null
     this.rotation = new Quaternion()
@@ -560,28 +789,91 @@ class F16Rig {
     this.to = new Vector3()
   }
 
-  // see HUD_HOUSING
-  hudHousing(f16) {
-    const { front, back, halfWidth, bottom } = HUD_HOUSING
-    const top = EYE_POSITION.z - front * Math.tan(OVER_NOSE * MathUtils.DEG2RAD)
-    const geometry = new BoxGeometry(2 * halfWidth, front - back, top - bottom)
+  // For the cockpit view's second, close-up pass over the airframe (see
+  // drawScene in index.js): only the parts reaching within
+  // COCKPIT_NEAR_REACH of the eye - which the first pass clipped - are drawn
+  // in full. The rest were drawn whole in the first pass, so here they only
+  // go into the depth buffer, to hide what is behind them, without being
+  // shaded again; those that write no depth (glass, flames) are left out.
+  // on: before the pass, off: after it, putting everything back.
+  setCockpitNearPass(on) {
+    if (on) {
+      this.nearPass = this.farParts.map((mesh) => ({ mesh, material: mesh.material, visible: mesh.visible }))
+      for (const { mesh, material } of this.nearPass) {
+        const materials = [material].flat()
+        if (materials.some((m) => m.transparent || !m.depthWrite || !m.depthTest)) mesh.visible = false
+        else mesh.material = Array.isArray(material) ? materials.map(depthOnly) : depthOnly(material)
+      }
+    } else if (this.nearPass) {
+      for (const { mesh, material, visible } of this.nearPass) {
+        mesh.material = material
+        mesh.visible = visible
+      }
+      this.nearPass = null
+    }
+  }
 
-    // BoxGeometry's faces, in order: +x, -x, +y, -y, +z, -z - four
-    // vertices each
-    const faces = ["side", "side", "other", "back", "top", "other"]
-    const colors = []
-    for (const face of faces) for (let i = 0; i < 4; i++) colors.push(...new Array(3).fill(HUD_HOUSING_SHADES[face]))
-    geometry.setAttribute("color", new BufferAttribute(new Float32Array(colors), 3))
+  // see COCKPIT_MODEL - loaded on its own, added to the cockpit parts
+  // once it is in
+  loadCockpitModel(f16) {
+    const { url, scale, anchor, hud, remains } = COCKPIT_MODEL
+    new GLTFLoader().load(
+      url,
+      (gltf) => {
+        const model = gltf.scene
+        model.updateMatrixWorld(true)
 
-    const material = new MeshBasicMaterial({ color: HUD_HOUSING_TINT, vertexColors: true })
-    const housing = new Mesh(geometry, material)
-    housing.name = "HudHousing"
-    housing.position.set(0, EYE_POSITION.y + (front + back) / 2, (top + bottom) / 2)
-    housing.visible = false
-    f16.add(housing)
+        const target = new Vector3(0, ANCHOR_DISTANCE, -ANCHOR_DISTANCE * Math.tan(OVER_NOSE * MathUtils.DEG2RAD)).add(EYE_POSITION)
+        const panel = new Object3D()
+        panel.name = "CockpitPanel"
+        panel.matrixAutoUpdate = false
+        panel.matrix
+          .makeTranslation(target)
+          .multiply(COCKPIT_MODEL_AXES)
+          .multiply(new Matrix4().makeScale(scale, scale, scale))
+          .multiply(new Matrix4().makeTranslation(anchor.clone().negate()))
 
-    this.cockpitInteriorParts.push({ mesh: housing, exteriorMaterial: material, cockpitMaterial: material, flatMaterial: material, flatTint: HUD_HOUSING_TINT })
-    return housing
+        const meshes = []
+        model.traverse((mesh) => mesh.isMesh && meshes.push(mesh))
+        for (const mesh of meshes) {
+          cutOut(mesh, (centre, top) => centre.x < hud.max.x && top.y > hud.min.y && centre.z > hud.min.z && centre.z < hud.max.z)
+          for (const box of remains) cutPieces(mesh, box)
+        }
+
+        // its top just on the line over the nose - see COCKPIT_MODEL
+        const lowest = Math.tan((PANEL_OVER_NOSE - OVER_NOSE) * MathUtils.DEG2RAD)
+        const sideways = Math.tan(NOSE_HALF_WIDTH * MathUtils.DEG2RAD)
+        let drop = -Infinity
+        const point = new Vector3()
+        for (const mesh of meshes) {
+          const frame = new Matrix4().multiplyMatrices(panel.matrix, mesh.matrixWorld)
+          const position = mesh.geometry.attributes.position
+          for (const i of mesh.geometry.index.array) {
+            point.fromBufferAttribute(position, i).applyMatrix4(frame).sub(EYE_POSITION)
+            if (point.y <= 0 || Math.abs(point.x) > point.y * sideways) continue
+            drop = Math.max(drop, point.z - Math.hypot(point.x, point.y) * lowest)
+          }
+        }
+        panel.matrix.premultiply(new Matrix4().makeTranslation(0, 0, -drop))
+
+        for (const mesh of meshes) {
+          // shaded in fixed, plain white light, without shadows - see
+          // cockpitPanelMaterial
+          const own = mesh.material
+          const toAircraft = new Matrix3().setFromMatrix4(new Matrix4().multiplyMatrices(panel.matrix, mesh.matrixWorld))
+          mesh.material = cockpitPanelMaterial(own.map, own.side, toAircraft)
+          own.dispose()
+        }
+
+        panel.add(model)
+        panel.visible = false
+        f16.add(panel)
+        this.cockpitOnlyParts.push(panel)
+        this.nearParts.push(...meshes)
+      },
+      () => {},
+      (error) => console.log("Could not load the cockpit model: " + error),
+    )
   }
 
   // see INTAKE and NOZZLE

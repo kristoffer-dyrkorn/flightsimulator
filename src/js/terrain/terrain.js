@@ -21,6 +21,11 @@ export default class Terrain {
     this.fetchQueue = []
 
     Tile.ktx2Loader.detectSupport(renderer)
+    // no BC7 for the terrain - see Tile.terrainKtx2Loader
+    Tile.terrainKtx2Loader.detectSupport(renderer)
+    // for uploading the tiles' textures as they arrive - see Tile.load
+    Tile.renderer = renderer
+    Tile.terrainKtx2Loader.workerConfig.bptcSupported = false
     Tile.bvhWorker = new GenerateMeshBVHWorker()
 
     for (let y = miny; y <= maxy; y += TILE_EXTENTS) {

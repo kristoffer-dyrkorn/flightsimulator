@@ -71,6 +71,8 @@ Features after July 2025 have been made using AI.
 - Sky and landscape rendering adjusting to the time of day, with atmospheric scattering
 - Updated F16 model, now with proper animation of landing gears and gear bay doors
 - Added varying engine nozzle radius and engine glow, along with afterburner plumes
+- Added simple cockpit panel
+- Updated to latest version of three.js
 
 #### September 2026:
 
@@ -141,7 +143,8 @@ Features after July 2025 have been made using AI.
   - "NASA Technical Paper 1538", Nguyen, L.T. et al., 1979
   - "NASA Technical Note D-8176", Gilbert at al, 1976
 - Brown noise generator is taken from https://noisehack.com/generate-noise-web-audio-api/
-- 3D model of F-16 is taken from http://www.domawe.net/2015/10/f-16c-fighting-falcon-free-3d-models.html, the landing gears from https://rigmodels.com/model.php?view=F-16_Fighting_Falcon_Jet_Fighter_Aircraft-3d-model__81ac66f8ec544649927fb2fc0e44fba1
+- F16 aircraft model is by [klgaming2024](https://www.cgtrader.com/free-3d-models/aircraft/jet/f16-fighting-falcon-ed478eeb-d215-4b40-834f-8df27079b859)
+- Cockpit front panel is based on "F16C Block 50/52 + Cockpit" by [graphXDoses](https://sketchfab.com/3d-models/f16c-block-5052-cockpit-83fb3b74c97d46febda2813331de168d)
 - The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
 
 ## License

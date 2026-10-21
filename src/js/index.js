@@ -17,8 +17,9 @@ import {
   Mesh,
   MathUtils,
   Ray,
+  Vector2,
   Vector3,
-  PCFSoftShadowMap,
+  PCFShadowMap,
 } from "three"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
@@ -123,11 +124,16 @@ const wheelWorldPosition = new Vector3()
 const aircraftPosition = new Vector3()
 
 const canvas = document.getElementById("webgl")
+const MAX_PIXEL_RATIO = 1.5
 const renderer = new WebGLRenderer({ canvas: canvas, antialias: true })
-renderer.setPixelRatio(window.devicePixelRatio)
+// Rendering at a high-density display's full resolution (2 on most Macs)
+// costs much more than it shows, with antialiasing on - so at most this
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, MAX_PIXEL_RATIO))
 renderer.setSize(window.innerWidth, window.innerHeight)
 renderer.shadowMap.enabled = true
-renderer.shadowMap.type = PCFSoftShadowMap
+// soft-edged: several samples spread over shadow.radius (three.js r186 on -
+// PCFSoftShadowMap was folded into this)
+renderer.shadowMap.type = PCFShadowMap
 // the scene and the aircraft are drawn in two passes into the same buffers
 // (see drawScene), which clears them itself before the first
 renderer.autoClear = false
@@ -256,7 +262,7 @@ const cameras = []
 // main camera - internal view from cockpit
 const camera = new PerspectiveCamera()
 camera.up.set(0, 0, 1)
-camera.fov = 55
+camera.fov = 65
 camera.near = 1
 camera.far = 50000
 
@@ -264,9 +270,14 @@ scene.add(camera)
 
 cameras.push(camera)
 
-// set up two secondary (external) cameras, derived from the main
-cameras.push(camera.clone())
-cameras.push(camera.clone())
+// set up two secondary (external) cameras, derived from the main, with a
+// narrower field of view
+const EXTERNAL_CAMERA_FOV = 50
+for (let i = 0; i < 2; i++) {
+  const external = camera.clone()
+  external.fov = EXTERNAL_CAMERA_FOV
+  cameras.push(external)
+}
 
 const externalCameraPosition = {
   distance: 30,
@@ -672,11 +683,15 @@ function terrainClearanceBelow(worldPosition) {
   return hit ? hit.distance : null
 }
 
+// where on the ground (scene x and y) the aircraft's shadow is
+const groundShadowCenter = new Vector2()
+
 // stretch the shadow camera down to the ground below the aircraft, and
 // pick the terrain tiles its shadow falls on
 function updateGroundShadow() {
   const shadowCamera = directionalLight.shadow.camera
   const tiles = []
+  let reach = 0
 
   shadowCamera.far = SHADOW_LIGHT_DISTANCE + SHADOW_EXTENT
 
@@ -685,13 +700,19 @@ function updateGroundShadow() {
     const groundDistance = heightAboveGround / sunDirection.z
     shadowCamera.far += groundDistance + GROUND_SHADOW_MARGIN
 
-    // the shadow's center on the ground, and the tiles under the corners
-    // of the shadow box around it
-    const centerX = f16.position.x - sunDirection.x * groundDistance
-    const centerY = f16.position.y - sunDirection.y * groundDistance
+    // the shadow's center on the ground, and how far from there it can
+    // fall: the shadow box's footprint, stretched out along the sun's
+    // direction the lower the sun is, and moved along it by ground up to
+    // GROUND_SHADOW_MARGIN higher or lower than the ground under the
+    // aircraft. Then the tiles under the corners of that.
+    groundShadowCenter.set(f16.position.x - sunDirection.x * groundDistance, f16.position.y - sunDirection.y * groundDistance)
+    const centerX = groundShadowCenter.x
+    const centerY = groundShadowCenter.y
+    const across = Math.hypot(sunDirection.x, sunDirection.y)
+    reach = SHADOW_EXTENT * (1 + 1 / sunDirection.z) + (GROUND_SHADOW_MARGIN * across) / sunDirection.z
 
-    for (const dx of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
-      for (const dy of [-SHADOW_EXTENT, SHADOW_EXTENT]) {
+    for (const dx of [-reach, reach]) {
+      for (const dy of [-reach, reach]) {
         const x = centerX + dx
         const y = centerY + dy
         const tileX = Math.round(x - ((x - MINX) % TILE_EXTENTS))
@@ -706,7 +727,7 @@ function updateGroundShadow() {
   shadowCamera.updateProjectionMatrix()
   directionalLight.shadow.bias = -SHADOW_DEPTH_BIAS / (shadowCamera.far - shadowCamera.near)
 
-  groundShadow.update(tiles)
+  groundShadow.update(tiles, groundShadowCenter, reach)
 }
 
 // whether a world position (in the scene's own UTM33-meters coordinates)
@@ -1060,7 +1081,9 @@ function drawScene(currentFrametime) {
   // From the cockpit, much of the airframe in view - the canopy frame, the
   // HUD glass - is closer than the near plane the pass above shares with
   // the terrain, and was clipped away. So it is drawn again on top, with
-  // a camera that clips much closer. Its depth range doesn't match the
+  // a camera that clips much closer - in full only the parts that reach
+  // that close, the rest only into the depth buffer (see
+  // setCockpitNearPass in graphics/f16Model.js). Its depth range doesn't match the
   // terrain's, so the depth buffer is cleared first - which is fine, as
   // nothing outside can be in front of the airframe seen from inside it.
   // The ground shadow is left out of this pass: it needs the terrain's
@@ -1082,7 +1105,9 @@ function drawScene(currentFrametime) {
     shadow.bias = -COCKPIT_SHADOW_DEPTH_BIAS / (shadow.camera.far - shadow.camera.near)
     shadow.normalBias = COCKPIT_SHADOW_NORMAL_BIAS
 
+    f16Rig?.setCockpitNearPass(true)
     renderer.render(aircraftScene, aircraftCamera)
+    f16Rig?.setCockpitNearPass(false)
 
     shadow.bias = bias
     shadow.normalBias = SHADOW_NORMAL_BIAS
