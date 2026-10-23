@@ -124,7 +124,7 @@ const wheelWorldPosition = new Vector3()
 const aircraftPosition = new Vector3()
 
 const canvas = document.getElementById("webgl")
-const MAX_PIXEL_RATIO = 1.5
+const MAX_PIXEL_RATIO = 1.75
 const renderer = new WebGLRenderer({ canvas: canvas, antialias: true })
 // Rendering at a high-density display's full resolution (2 on most Macs)
 // costs much more than it shows, with antialiasing on - so at most this
@@ -705,7 +705,10 @@ function updateGroundShadow() {
     // direction the lower the sun is, and moved along it by ground up to
     // GROUND_SHADOW_MARGIN higher or lower than the ground under the
     // aircraft. Then the tiles under the corners of that.
-    groundShadowCenter.set(f16.position.x - sunDirection.x * groundDistance, f16.position.y - sunDirection.y * groundDistance)
+    groundShadowCenter.set(
+      f16.position.x - sunDirection.x * groundDistance,
+      f16.position.y - sunDirection.y * groundDistance,
+    )
     const centerX = groundShadowCenter.x
     const centerY = groundShadowCenter.y
     const across = Math.hypot(sunDirection.x, sunDirection.y)
@@ -1193,11 +1196,7 @@ const COCKPIT_INTERIOR_FLAT_YAW = 90
 // the pilot looking ahead - or its own material back for the exterior views
 function paintCockpitInterior(inCockpit, lookingAhead) {
   for (const part of cockpitInteriorParts) {
-    part.mesh.material = !inCockpit
-      ? part.exteriorMaterial
-      : lookingAhead
-        ? part.flatMaterial
-        : part.cockpitMaterial
+    part.mesh.material = !inCockpit ? part.exteriorMaterial : lookingAhead ? part.flatMaterial : part.cockpitMaterial
   }
 }
 

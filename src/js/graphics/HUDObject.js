@@ -39,6 +39,18 @@ const HEADING_SCALE = 10
 const SCALE_REACH = 150
 const SCALE_FONT = "1.5em Verdana"
 
+// The vertical velocity scale shown with the gear down (VV, in the real
+// aircraft's terms - see drawVerticalVelocityScale): from VV_MAX ft/min
+// climbing to VV_MIN sinking, a tick every VV_STEP and a longer, labelled
+// one every VV_MAJOR, pixels per ft/min, and how far inside the altitude
+// scale it stands, pixels
+const VV_MAX = 1000
+const VV_MIN = -2000
+const VV_STEP = 500
+const VV_MAJOR = 1000
+const VV_SCALE = 0.06
+const VV_INSET = 75
+
 // calibrated airspeed, from the static pressure and Mach number - see
 // calibratedAirspeed
 const SEA_LEVEL_PRESSURE = 2116.22 // lb/ft^2
@@ -180,6 +192,7 @@ export default class HUDObject {
     this.showAoa = !weightOnWheels || airspeed >= AOA_SHOWN_ABOVE_KT
     this.showFlightPath = groundSpeed >= FLIGHT_PATH_SHOWN_ABOVE_KT
     this.showAoaBracket = gearDown && this.showAoa
+    this.showVerticalVelocity = gearDown
     this.mach = atmosphericModel.rmach.toFixed(2)
     this.altitudeFeet = Math.round(airplaneState.alt)
 
@@ -216,10 +229,8 @@ export default class HUDObject {
 
     this.g = airplaneState.nz
 
-    this.sinkRateText = (100 * Math.round(this.smoothedSinkRate(airplaneState.sinkRate) / 100)).toLocaleString(
-      undefined,
-      { maximumFractionDigits: 0 },
-    )
+    // climbing positive, ft/min - averaged, see smoothedSinkRate
+    this.verticalVelocity = -this.smoothedSinkRate(airplaneState.sinkRate)
   }
 
   getTextBoundingBox(text) {
@@ -484,6 +495,39 @@ export default class HUDObject {
     this.ctx.stroke()
   }
 
+  // With the gear down, the climb or sink rate on a fixed scale just inside
+  // the altitude scale, as the real aircraft's VV scale: zero level with the
+  // altitude box, climbing up and sinking down, a tick every VV_STEP ft/min
+  // and a longer one, labelled in thousands, every VV_MAJOR - and a pointer
+  // on its altitude side, held at the scale's end beyond it
+  drawVerticalVelocityScale() {
+    const ctx = this.ctx
+    const x = this.width / 2 + SIDE_LABEL_OFFSET - VV_INSET
+    const y = 0.5 * this.height
+
+    ctx.save()
+    ctx.font = SCALE_FONT
+    ctx.textAlign = "right"
+    ctx.beginPath()
+    for (let v = VV_MIN; v <= VV_MAX; v += VV_STEP) {
+      const tickY = y - v * VV_SCALE
+      const isMajor = v % VV_MAJOR === 0
+      ctx.moveTo(x, tickY)
+      ctx.lineTo(x - (isMajor ? 16 : 9), tickY)
+      if (isMajor) ctx.fillText(String(v / 1000), x - 22, tickY)
+    }
+    ctx.stroke()
+
+    const pointerY = y - MathUtils.clamp(this.verticalVelocity, VV_MIN, VV_MAX) * VV_SCALE
+    ctx.beginPath()
+    ctx.moveTo(x + 3, pointerY)
+    ctx.lineTo(x + 17, pointerY - 7)
+    ctx.lineTo(x + 17, pointerY + 7)
+    ctx.closePath()
+    ctx.stroke()
+    ctx.restore()
+  }
+
   // heading, every 5 degrees, labelled every 10 in tens of degrees, as a
   // compass card is - on the side of the heading box towards the HUD's
   // centre, wherever the box is (see headingAtTop)
@@ -553,6 +597,7 @@ export default class HUDObject {
 
     this.drawSpeedScale()
     this.drawAltitudeScale()
+    if (this.showVerticalVelocity) this.drawVerticalVelocityScale()
 
     const aoaText = this.showAoa ? Math.round(this.aoa * MathUtils.RAD2DEG) : "--"
 

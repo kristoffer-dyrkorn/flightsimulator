@@ -1,6 +1,8 @@
 import {
   AdditiveBlending,
   AnimationMixer,
+  Ray,
+  BufferAttribute,
   Box3,
   Color,
   CylinderGeometry,
@@ -177,6 +179,39 @@ const COCKPIT_HIDDEN = ["Seat", "Hud"]
 // cockpit view - see COCKPIT_UNSHADOWED_PARTS in index.js
 const COCKPIT_UNSHADOWED = ["Cockpit002", "Control", "Canopy_mesh", "Canopy001"]
 
+// The gear doors don't quite fill their openings in the skin: closed, up
+// to 3 mm of slit shows along their edges, and the bay walls inside -
+// lit by the sun, as the shadow map is far too coarse to shade a slit that
+// narrow - showed through as thin bright lines, as if the doors weren't
+// quite closed. So each door is made DOOR_OVERLAP larger all round, along
+// its surface, to overlap the opening's edge - see growDoor.
+const GEAR_DOORS = /^Cover_/
+const DOOR_OVERLAP = 0.006 // m
+
+// and nowhere further out of the skin than this - see fitDoorsToSkin
+const DOOR_FIT_PROUD = 0.0005 // m
+// the height of the fuselage's centreline, aircraft frame - what "out of
+// the fuselage" is measured from
+const FUSELAGE_AXIS_Z = -0.2 // m
+
+// The gear legs and wheels, hidden while the gear is fully up: the closed
+// bays hide them anyway, and a retracted main wheel pokes a few millimetres
+// through its door in the model
+const GEAR_PARTS = /^(Gear|Wheel)/
+
+// The stores under the wings - the two fuel tanks, the two AIM-120s and
+// the two AIM-9s on the outer pylons - aren't drawn: the flight model
+// flies the aircraft clean, at its weight and drag without them. Only the
+// AIM-9s on the wing tips stay. The pylons are left as they are.
+const REMOVED_STORES = [
+  "Fuel_L",
+  "Fuel_L001",
+  "AIM_120_AMHRAAM",
+  "AIM_120_AMHRAAM001",
+  "AIM_9_Sidewinder001",
+  "AIM_9_Sidewinder002",
+]
+
 // the cockpit's own parts, shown unshaded from the cockpit - see
 // paintCockpitInterior in index.js
 const COCKPIT_INTERIOR = ["Cockpit002", "Control"]
@@ -313,6 +348,85 @@ function cockpitPanelMaterial(map, side, toAircraft) {
         #include <colorspace_fragment>
       }`,
   })
+}
+
+// Makes a gear door larger by margin (m) on every side, along its surface:
+// each vertex is moved margin away from the door's centre, along the
+// surface - the direction from the centre less its part along the vertex's
+// normal - so the outline grows without lifting off the skin, even where
+// the door curves round the fuselage. In the door's own (bind pose) frame,
+// whose units are found from two of its vertices as posed, since a skinned
+// mesh's vertices are scaled by its bones, not by its own matrix.
+function growDoor(mesh, margin) {
+  // the positions come compressed to 16 bits, scaled to just fit the door -
+  // with no room to grow in, so they are unpacked to plain floats first
+  const packed = mesh.geometry.attributes.position
+  const unpacked = new Float32Array(3 * packed.count)
+  for (let i = 0; i < packed.count; i++) {
+    unpacked[3 * i] = packed.getX(i)
+    unpacked[3 * i + 1] = packed.getY(i)
+    unpacked[3 * i + 2] = packed.getZ(i)
+  }
+  mesh.geometry.setAttribute("position", new BufferAttribute(unpacked, 3))
+  const position = mesh.geometry.attributes.position
+  const normal = mesh.geometry.attributes.normal
+  const bind = (i) => new Vector3().fromBufferAttribute(position, i)
+  const posed = (i) => {
+    const v = bind(i)
+    if (mesh.isSkinnedMesh) mesh.applyBoneTransform(i, v)
+    return v.applyMatrix4(mesh.matrixWorld)
+  }
+  let far = 0
+  for (let i = 1; i < position.count && far === 0; i++) if (bind(i).distanceTo(bind(0)) > 0) far = i
+  if (far === 0) return
+  const step = margin * (bind(far).distanceTo(bind(0)) / posed(far).distanceTo(posed(0)))
+
+  const centre = new Vector3()
+  for (let i = 0; i < position.count; i++) centre.add(bind(i))
+  centre.divideScalar(position.count)
+
+  // the way the door faces, either way: its normals, turned to agree with
+  // the first and summed - the faces of its outside and inside dominate,
+  // the narrow faces round its rim hardly count
+  const facing = new Vector3()
+  const first = new Vector3().fromBufferAttribute(normal, 0)
+  for (let i = 0; i < position.count; i++) {
+    const n = new Vector3().fromBufferAttribute(normal, i)
+    facing.addScaledVector(n, Math.sign(n.dot(first)) || 1)
+  }
+  facing.normalize()
+
+  // Vertices in the same place - at the door's edges and creases, one for
+  // each face that meets there - move together, or the door would tear
+  // apart along them. They move along the surface of the door's outside or
+  // inside face there, whichever of their normals faces most the way the
+  // door does: the rim's normal points sideways, and the surface it would
+  // give would take out most of the move an edge needs.
+  const key = (v) => `${v.x.toFixed(5)},${v.y.toFixed(5)},${v.z.toFixed(5)}`
+  const normals = new Map()
+  for (let i = 0; i < position.count; i++) {
+    const k = key(bind(i))
+    const n = new Vector3().fromBufferAttribute(normal, i).normalize()
+    const best = normals.get(k)
+    if (!best || Math.abs(n.dot(facing)) > Math.abs(best.dot(facing))) normals.set(k, n)
+  }
+
+  const moves = new Map()
+  for (let i = 0; i < position.count; i++) {
+    const v = bind(i)
+    const k = key(v)
+    if (!moves.has(k)) {
+      const n = normals.get(k).normalize()
+      const out = v.clone().sub(centre)
+      out.addScaledVector(n, -out.dot(n))
+      moves.set(k, out.lengthSq() > 0 ? out.normalize().multiplyScalar(step) : new Vector3())
+    }
+    v.add(moves.get(k))
+    position.setXYZ(i, v.x, v.y, v.z)
+  }
+  position.needsUpdate = true
+  mesh.geometry.computeBoundingBox()
+  mesh.geometry.computeBoundingSphere()
 }
 
 // whether any of a mesh's vertices, as posed, is within reach of point
@@ -671,6 +785,24 @@ class F16Rig {
     this.object.add(model)
     f16.add(this.object)
 
+    // see DOOR_OVERLAP
+    model.updateMatrixWorld(true)
+    model.traverse((mesh) => {
+      if (!mesh.isMesh || !GEAR_DOORS.test(mesh.name)) return
+      growDoor(mesh, DOOR_OVERLAP)
+    })
+
+    // the gear legs and wheels, hidden while the gear is up - see GEAR_PARTS
+    this.gearParts = []
+    model.traverse((mesh) => mesh.isMesh && GEAR_PARTS.test(mesh.name) && this.gearParts.push(mesh))
+
+    // see REMOVED_STORES
+    for (const name of REMOVED_STORES) {
+      const store = find(model, name, (o) => !o.isBone)
+      if (store) store.removeFromParent()
+      else console.log("F-16 model: no store " + name)
+    }
+
     model.traverse((o) => {
       if (!o.isMesh) return
       // The metal parts - the engine nozzle, the gear - are authored fully
@@ -810,6 +942,91 @@ class F16Rig {
         mesh.visible = visible
       }
       this.nearPass = null
+    }
+  }
+
+  // The gear doors, made larger to cover the slits round them (see
+  // DOOR_OVERLAP), are grown straight out along their surface - while the
+  // fuselage curves away under their edges, which then stood some 7 mm
+  // proud of the skin, as if not quite shut. So once the doors are shut,
+  // each part of a door standing proud of the skin is moved back in, along
+  // the door's own normal, to DOOR_FIT_PROUD out of it. The skin is the
+  // fuselage's triangles near the door, as posed.
+  fitDoorsToSkin() {
+    this.object.updateMatrixWorld(true)
+    let body = null
+    const doors = []
+    this.object.traverse((o) => {
+      if (!o.isMesh) return
+      if (GEAR_DOORS.test(o.name)) doors.push(o)
+      else if (o.name === "mesh_0") body = o
+    })
+    if (!body) return
+
+    // a mesh's vertex, as posed, in the world
+    const posed = (mesh, i, v) => {
+      v.fromBufferAttribute(mesh.geometry.attributes.position, i)
+      if (mesh.isSkinnedMesh) mesh.applyBoneTransform(i, v)
+      return v.applyMatrix4(mesh.matrixWorld)
+    }
+    const bodyPosition = body.geometry.attributes.position
+    const bodyCorners = Array.from({ length: bodyPosition.count }, (_, i) => posed(body, i, new Vector3()))
+    const bodyIndex = body.geometry.index ? body.geometry.index.array : Array.from({ length: bodyPosition.count }, (_, i) => i)
+
+    const ray = new Ray()
+    const hit = new Vector3()
+    for (const door of doors) {
+      const position = door.geometry.attributes.position
+      const normal = door.geometry.attributes.normal
+      const corners = Array.from({ length: position.count }, (_, i) => posed(door, i, new Vector3()))
+      const box = new Box3().setFromPoints(corners).expandByScalar(0.05)
+      const skin = []
+      for (let t = 0; t < bodyIndex.length; t += 3) {
+        const a = bodyCorners[bodyIndex[t]]
+        const b = bodyCorners[bodyIndex[t + 1]]
+        const c = bodyCorners[bodyIndex[t + 2]]
+        if (box.containsPoint(a) || box.containsPoint(b) || box.containsPoint(c)) skin.push([a, b, c])
+      }
+
+      // the door's frame as posed - it moves rigidly, with one bone - to
+      // turn its normals into the world and the moves back into its frame
+      const toWorld = new Matrix4().copy(door.matrixWorld)
+      if (door.isSkinnedMesh) {
+        const bone = door.geometry.attributes.skinIndex.getX(0)
+        toWorld
+          .multiply(door.bindMatrixInverse)
+          .multiply(door.skeleton.bones[bone].matrixWorld)
+          .multiply(door.skeleton.boneInverses[bone])
+          .multiply(door.bindMatrix)
+      }
+      const normalToWorld = new Matrix3().getNormalMatrix(toWorld)
+      const toDoor = new Matrix3().setFromMatrix4(toWorld).invert()
+
+      // out of the fuselage: away from its centreline
+      const outwards = (p, n) => (n.x * p.x + n.z * (p.z - FUSELAGE_AXIS_Z) < 0 ? n.negate() : n)
+
+      const moves = new Map()
+      for (let i = 0; i < position.count; i++) {
+        const p = corners[i]
+        const key = `${p.x.toFixed(5)},${p.y.toFixed(5)},${p.z.toFixed(5)}`
+        if (!moves.has(key)) {
+          const n = outwards(p, new Vector3().fromBufferAttribute(normal, i).applyMatrix3(normalToWorld).normalize())
+          ray.set(p.clone().addScaledVector(n, 0.05), n.clone().negate())
+          let nearest = Infinity
+          for (const [a, b, c] of skin) if (ray.intersectTriangle(a, b, c, false, hit)) nearest = Math.min(nearest, hit.distanceTo(ray.origin))
+          // the ray starts 5 cm out: skin further than that from it is
+          // under the door, which stands proud of it by the difference
+          const proud = nearest - 0.05
+          moves.set(key, nearest < 0.1 && proud > DOOR_FIT_PROUD ? n.multiplyScalar(-(proud - DOOR_FIT_PROUD)) : null)
+        }
+        const move = moves.get(key)
+        if (!move) continue
+        const v = new Vector3().fromBufferAttribute(position, i).add(move.clone().applyMatrix3(toDoor))
+        position.setXYZ(i, v.x, v.y, v.z)
+      }
+      position.needsUpdate = true
+      door.geometry.computeBoundingBox()
+      door.geometry.computeBoundingSphere()
     }
   }
 
@@ -1054,6 +1271,7 @@ class F16Rig {
    * @param strutTravel   {nose, mainL, mainR}, meters each strut is compressed
    */
   update(gearPosition, noseSteer = 0, strutTravel = null) {
+    for (const part of this.gearParts) part.visible = gearPosition > 0
     for (const p of this.animatedPose) {
       p.bone.quaternion.copy(p.quaternion)
       p.bone.position.copy(p.position)
@@ -1064,6 +1282,11 @@ class F16Rig {
     for (const p of this.animatedPose) {
       p.quaternion.copy(p.bone.quaternion)
       p.position.copy(p.bone.position)
+    }
+    // the doors are only known shut once the gear is up - see fitDoorsToSkin
+    if (gearPosition === 0 && !this.doorsFitted) {
+      this.doorsFitted = true
+      this.fitDoorsToSkin()
     }
 
     const a = this.actuators
