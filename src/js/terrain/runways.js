@@ -1,4 +1,5 @@
 import { SERVER } from "./tile.js"
+import RunwayLights, { thresholdsIn } from "./runwayLights.js"
 
 // tileName + ".json" for every tile that actually has a runway geojson
 // sidecar file. Only these are ever fetched - the rest are open terrain,
@@ -9,6 +10,7 @@ const RUNWAY_TILES = new Set([
   "-49000-6565750.json",
   "-49000-6655000.json",
   "-49000-6667750.json",
+  "-49000-6718750.json",
   "-61750-6616750.json",
   "1009250-7917250.json",
   "1034750-7891750.json",
@@ -17,14 +19,25 @@ const RUNWAY_TILES = new Set([
   "1060250-7802500.json",
   "1060250-7840750.json",
   "1085750-7879000.json",
+  "129500-6502000.json",
   "129500-7012000.json",
+  "167750-6604000.json",
+  "167750-6616750.json",
   "2000-6833500.json",
+  "218750-6565750.json",
+  "231500-6680500.json",
+  "231500-7063000.json",
+  "231500-7075750.json",
+  "257000-6578500.json",
+  "269750-6642250.json",
+  "269750-6655000.json",
   "269750-6667750.json",
   "27500-6884500.json",
   "27500-6922750.json",
   "282500-6667750.json",
   "282500-6680500.json",
   "282500-7037500.json",
+  "295250-6782500.json",
   "295250-7037500.json",
   "308000-6935500.json",
   "308000-7190500.json",
@@ -43,10 +56,12 @@ const RUNWAY_TILES = new Set([
   "473750-7560250.json",
   "499250-7598500.json",
   "499250-8682250.json",
+  "512000-8682250.json",
   "537500-7675000.json",
   "537500-7687750.json",
   "563000-7585750.json",
   "563000-7598500.json",
+  "626750-7662250.json",
   "639500-7662250.json",
   "639500-7726000.json",
   "65750-6795250.json",
@@ -91,7 +106,21 @@ const RUNWAY_TILES = new Set([
  */
 
 export default class RunwayRegistry {
-  constructor() {
+  constructor(scene) {
+    // the runways' lights, shown while their tiles are loaded - see
+    // runwayLights.js
+    this.lights = new RunwayLights(scene)
+    // tileName -> the file's features, for the lights, once fetched
+    this.features = new Map()
+    // every runway threshold read so far, in the scene's coordinates - the
+    // slope indicators are placed from them (see runwayLights.js), and one
+    // can be in a neighbouring tile's file
+    this.thresholds = new Map()
+    // the ones of those found from their own threshold lights, not wing bars
+    this.thresholdLights = new Set()
+    // tileName -> its file's fetch, once started
+    this.fetches = new Map()
+
     // tileName -> array of polygons (each an array of [x, y] tile-local
     // points, outer ring only - a runway outline has no holes worth
     // modeling), or null for a tile with no runway file at all. Never
@@ -115,26 +144,61 @@ export default class RunwayRegistry {
    */
   load(tileName) {
     this.active.add(tileName)
-
-    if (this.cache.has(tileName)) return
     if (!RUNWAY_TILES.has(`${tileName}.json`)) return
 
-    // claim this tileName immediately (with a still-loading placeholder),
-    // so a second load() before the fetch resolves can't start a second
-    // request for the same file
-    this.cache.set(tileName, null)
+    this.fetch(tileName).then((features) => {
+      if (!features || !this.active.has(tileName)) return
+      this.lights.add(tileName, features, this.thresholds)
 
-    fetch(`${SERVER}/runways/${tileName}.json`)
-      .then((response) => (response.ok ? response.json() : null))
-      .then((geojson) => {
-        if (!geojson) return
-
-        const polygons = geojson.features.flatMap((feature) => extractPolygons(feature.geometry))
-        if (polygons.length > 0) {
-          this.cache.set(tileName, polygons)
-        }
+      // a slope indicator whose threshold is in a neighbouring tile's file:
+      // read the neighbours', and place the lights again once they are in
+      const missing = features.some(
+        (f) =>
+          ["papi", "apapi", "plasi"].includes(f.properties.system) &&
+          !this.thresholds.has(`${f.id.split("/")[0]}/${f.properties.runway}/${f.properties.direction}`),
+      )
+      if (!missing) return
+      Promise.all(neighbours(tileName).map((name) => this.fetch(name))).then(() => {
+        if (!this.active.has(tileName)) return
+        this.lights.remove(tileName)
+        this.lights.add(tileName, features, this.thresholds)
       })
-      .catch(() => {})
+    })
+  }
+
+  // a tile's runway file's features - fetched once, and the polygons and
+  // thresholds in it kept - or null if it has none
+  fetch(tileName) {
+    if (!RUNWAY_TILES.has(`${tileName}.json`)) return Promise.resolve(null)
+    if (!this.fetches.has(tileName)) {
+      // claim this tileName immediately (with a still-loading placeholder),
+      // so a second load() before the fetch resolves can't start a second
+      // request for the same file
+      this.cache.set(tileName, null)
+      const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
+      this.fetches.set(
+        tileName,
+        fetch(`${SERVER}/runways/${tileName}.json`)
+          .then((response) => (response.ok ? response.json() : null))
+          .then((geojson) => {
+            if (!geojson) return null
+            this.features.set(tileName, geojson.features)
+            for (const [key, threshold, fromWingBars] of thresholdsIn([x, y], geojson.features)) {
+              if (fromWingBars && this.thresholdLights.has(key)) continue
+              this.thresholds.set(key, threshold)
+              if (!fromWingBars) this.thresholdLights.add(key)
+            }
+
+            const polygons = geojson.features.flatMap((feature) => extractPolygons(feature.geometry))
+            if (polygons.length > 0) {
+              this.cache.set(tileName, polygons)
+            }
+            return geojson.features
+          })
+          .catch(() => null),
+      )
+    }
+    return this.fetches.get(tileName)
   }
 
   /**
@@ -147,6 +211,7 @@ export default class RunwayRegistry {
    */
   unload(tileName) {
     this.active.delete(tileName)
+    this.lights.remove(tileName)
   }
 
   /**
@@ -193,4 +258,15 @@ function pointInPolygon(x, y, polygon) {
   }
 
   return inside
+}
+
+// the names of the eight tiles round a tile - see tile.js's tileName
+const TILE_EXTENTS = 50 * 255
+function neighbours(tileName) {
+  const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
+  const names = []
+  for (const dx of [-1, 0, 1]) {
+    for (const dy of [-1, 0, 1]) if (dx || dy) names.push(`${x + dx * TILE_EXTENTS}-${y + dy * TILE_EXTENTS}`)
+  }
+  return names
 }

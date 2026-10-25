@@ -15,7 +15,7 @@ export default class Terrain {
     // runway legality polygons for the tiles that are currently loaded -
     // see runways.js. Owned here, alongside the tiles themselves, since
     // it's kept in step with exactly the same load/unload lifecycle.
-    this.runways = new RunwayRegistry()
+    this.runways = new RunwayRegistry(scene)
 
     // queue for fetching tiles, to rate limit image fetching and decoding
     this.fetchQueue = []

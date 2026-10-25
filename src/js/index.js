@@ -522,7 +522,7 @@ function updateSun() {
 // terrain below. So the sunlight on the aircraft dims with the sun's height
 // the same way: by how much less of it level ground gets than with the sun
 // at SUNLIGHT_REFERENCE_ELEVATION.
-sky.onUpdate = () => {
+sky.onUpdate = () => { console.log("F-16 ADAPT " + sky.adaptation.toFixed(4) + " sun " + sky.sunElevation.toFixed(2)) // TEMP
   Tile.light.setRGB(...sky.groundLight)
   for (const part of cockpitInteriorParts) {
     if (!part.flatMaterial) continue
@@ -1060,6 +1060,7 @@ function drawScene(currentFrametime) {
   }
 
   terrain.update(camera, showWireFrame)
+  terrain.runways.lights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio(), cameras[0].position, performance.now() / 1000)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
   f16Rig?.setEngine(renderState.pow, sky.adaptation)
 
