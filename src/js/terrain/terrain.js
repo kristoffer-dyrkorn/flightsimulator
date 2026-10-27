@@ -2,6 +2,7 @@ import Tile from "./tile.js"
 import { Vector3 } from "three"
 import { GenerateMeshBVHWorker } from "../externals/workers/GenerateMeshBVHWorker.js"
 import RunwayRegistry from "./runways.js"
+import SceneryLights from "./sceneryLights.js"
 
 const TILE_EXTENTS = 50 * 255
 
@@ -16,6 +17,10 @@ export default class Terrain {
     // see runways.js. Owned here, alongside the tiles themselves, since
     // it's kept in step with exactly the same load/unload lifecycle.
     this.runways = new RunwayRegistry(scene)
+
+    // lights from buildings and roads at night, shown while their tiles
+    // are loaded - see sceneryLights.js
+    this.sceneryLights = new SceneryLights(scene)
 
     // queue for fetching tiles, to rate limit image fetching and decoding
     this.fetchQueue = []

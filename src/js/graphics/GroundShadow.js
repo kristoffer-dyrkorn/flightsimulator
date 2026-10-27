@@ -1,4 +1,35 @@
-import { Mesh, BufferGeometry, BufferAttribute, ShadowMaterial, Box3, Matrix4, Vector3 } from "three"
+import { Mesh, BufferGeometry, BufferAttribute, ShadowMaterial, ShaderChunk, Box3, Matrix4, Vector3 } from "three"
+
+// The shadow on the ground can be softened beyond what the shadow map's own
+// filter gives - see setSoftness. It is sampled SOFT_SAMPLES times over a
+// disc of the given radius, turned about at random from pixel to pixel, as
+// three's own filter does with its five.
+const SOFT_SAMPLES = 32
+const DIRECTIONAL_SHADOW =
+  "getShadow( directionalShadowMap[ i ], directionalLight.shadowMapSize, directionalLight.shadowIntensity, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[ i ] )"
+const SOFT_DIRECTIONAL_SHADOW =
+  "softGroundShadow( directionalShadowMap[ i ], directionalLight.shadowMapSize, directionalLight.shadowIntensity, directionalLight.shadowBias, directionalLight.shadowRadius, vDirectionalShadowCoord[ i ] )"
+const SOFT_SHADOW = /* glsl */ `
+  uniform float softness; // radius, in the shadow map's coordinates
+  #if defined( SHADOWMAP_TYPE_PCF )
+    float softGroundShadow( sampler2DShadow shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+      if ( softness <= 0.0 ) return getShadow( shadowMap, shadowMapSize, shadowIntensity, shadowBias, shadowRadius, shadowCoord );
+      shadowCoord.xyz /= shadowCoord.w;
+      shadowCoord.z += shadowBias;
+      if ( shadowCoord.x < 0.0 || shadowCoord.x > 1.0 || shadowCoord.y < 0.0 || shadowCoord.y > 1.0 || shadowCoord.z > 1.0 ) return 1.0;
+      float phi = interleavedGradientNoise( gl_FragCoord.xy ) * PI2;
+      float shadow = 0.0;
+      for ( int k = 0; k < ${SOFT_SAMPLES}; k ++ ) {
+        shadow += texture( shadowMap, vec3( shadowCoord.xy + vogelDiskSample( k, ${SOFT_SAMPLES}, phi ) * softness, shadowCoord.z ) );
+      }
+      return mix( 1.0, shadow / ${SOFT_SAMPLES}.0, shadowIntensity );
+    }
+  #else
+    float softGroundShadow( sampler2D shadowMap, vec2 shadowMapSize, float shadowIntensity, float shadowBias, float shadowRadius, vec4 shadowCoord ) {
+      return getShadow( shadowMap, shadowMapSize, shadowIntensity, shadowBias, shadowRadius, shadowCoord );
+    }
+  #endif
+`
 
 // the shadow footprint is much smaller than a terrain tile, so it can
 // overlap at most 4 tiles (at a tile corner)
@@ -28,6 +59,14 @@ export default class GroundShadow {
       polygonOffsetFactor: -1,
       polygonOffsetUnits: -4,
     })
+    this.softness = { value: 0 }
+    this.material.onBeforeCompile = (shader) => {
+      shader.uniforms.softness = this.softness
+      shader.fragmentShader = shader.fragmentShader.replace(
+        "#include <shadowmask_pars_fragment>",
+        SOFT_SHADOW + ShaderChunk.shadowmask_pars_fragment.replace(DIRECTIONAL_SHADOW, SOFT_DIRECTIONAL_SHADOW),
+      )
+    }
 
     this.meshes = []
     for (let i = 0; i < MAX_TILES; i++) {
@@ -45,6 +84,14 @@ export default class GroundShadow {
     this.local = new Box3()
     this.toTile = new Matrix4()
     this.corner = new Vector3()
+  }
+
+  /**
+   * How soft the shadow's edges are: the radius it is blurred over, in the
+   * shadow map's coordinates - 0 for the shadow map's own filter.
+   */
+  setSoftness(radius) {
+    this.softness.value = radius
   }
 
   // hides the shadow until the next update() - see drawScene in index.js

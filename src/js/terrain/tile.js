@@ -87,6 +87,7 @@ export default class Tile {
       // dropped, so a plane never lands using a runway from ground that
       // isn't actually loaded any more
       this.terrain.runways.unload(this.tileName)
+      this.terrain.sceneryLights.unload(this.tileName)
     }
   }
 
@@ -96,6 +97,7 @@ export default class Tile {
     // Requested up front rather than after the mesh load succeeds, so it's
     // in place as early as the rest of this tile's data.
     this.terrain.runways.load(this.tileName)
+    this.terrain.sceneryLights.load(this.tileName)
 
     Tile.gltfLoader.load(
       `${SERVER}/glb50/${this.tileName}.glb`,

@@ -69,6 +69,20 @@ const PITCH_NZ_P = 2.0 /* deg of elevator per g of error */
 const PITCH_NZ_I = 2.0 /* deg/s of elevator per g of error */
 const PITCH_Q_D = 0.2 /* deg of elevator per deg/s of pitch rate */
 
+/* The trim the integrator holds keeps moving while the speed changes - with
+   the throttle at idle, a little more nose-up stabilator every second. An
+   integrator tracking a target that keeps moving lags it by a steady error,
+   and here that was 0.5-0.7% short of 1 g: enough to bend the flight path
+   down, so that hands off at idle the jet slid into a steepening dive instead
+   of holding its path and slowing towards the angle of attack limit, as the
+   real one, speed neutral, does. So a second integrator learns how fast the
+   trim is moving and moves it on at that rate. It leaks away over
+   PITCH_TRIM_RATE_TAU, so it follows slow trends like that and stays out of
+   manoeuvring, and is capped at PITCH_TRIM_RATE_MAX. */
+const PITCH_NZ_II = 1.0 /* deg/s^2 of elevator per g of error */
+const PITCH_TRIM_RATE_TAU = 20 /* s */
+const PITCH_TRIM_RATE_MAX = 1.0 /* deg/s */
+
 /* Angle of attack limiter. It works by taking g away from the command, not by
    fighting the g loop at the stabilator. Doing it at the command keeps one loop
    in charge of the aircraft: the g loop still sees an honest error, and there is
@@ -175,6 +189,22 @@ const LANDING_NZ_MAX = 2.0 /* most g landing mode may pull */
    aileron out to its stops exactly as before - lowering the gain does not
    lower the ceiling, it only softens how fast small commands get there. */
 const ROLL_P = 0.071 /* deg of aileron per deg/s of roll rate error */
+/* An integrator on the roll rate error, so that a centred stick holds the
+   roll rate at zero - and with it the bank angle, as in the real aircraft.
+   Without it, whatever small rolling moment the fixed aileron trim does not
+   match - it is right at one speed only - left a steady roll rate: hands
+   off with the throttle at idle, the wings rolled 25 degrees in a minute
+   and a half, and the jet spiralled down. Capped at ROLL_I_MAX of aileron. */
+const ROLL_I = 0.05 /* deg/s of aileron per deg/s of roll rate error */
+const ROLL_I_MAX = 5 /* deg */
+/* Both that integrator and PITCH_NZ_II's only learn hands off - the stick
+   within this of centre - and with the error small: they are there for slow
+   drift, and wound up by a manoeuvre they carried on after it, the roll on
+   after the stick was released, the g low after a pull. In between they
+   hold what they have. */
+const TRIM_LEARN_STICK = 0.02
+const TRIM_LEARN_NZ_ERROR = 0.1 /* g */
+const TRIM_LEARN_P_ERROR = 5 /* deg/s */
 const ROLL_ALPHA_FADE_START = 15 /* deg, where roll authority starts to fade */
 const ROLL_ALPHA_FADE = 0.7 /* fraction of authority given up at the AoA limit */
 
@@ -236,6 +266,10 @@ export default class FlightControlSystem {
        zero would make the aircraft sag for the first second while the
        integrator wound itself up to the value it was always going to reach. */
     this.pitchIntegrator = SimulationConstants.ELEVATOR_TRIM
+    // see PITCH_NZ_II
+    this.pitchTrimRate = 0
+    // see ROLL_I
+    this.rollIntegrator = 0
 
     /* low pass half of the yaw damper washout filter, deg/s */
     this.yawRateLowPass = 0
@@ -456,11 +490,22 @@ export default class FlightControlSystem {
     /* The integrator is what carries the trim, so clamping it to the travel of
        the stabilator is both the physical bound and the anti-windup: it cannot
        bank up error against a stop that it has no way of moving. */
-    this.pitchIntegrator = limit(
-      this.pitchIntegrator - PITCH_NZ_I * nzError * commandScale * dt,
-      SimulationConstants.ELEVATOR_MIN,
-      SimulationConstants.ELEVATOR_MAX,
-    )
+    // how fast the trim is moving - see PITCH_NZ_II. Not on the ground, where
+    // the g loop has nothing steady to follow.
+    const learnPitch = Math.abs(input.pitchStick) < TRIM_LEARN_STICK && Math.abs(nzError) < TRIM_LEARN_NZ_ERROR
+    this.pitchTrimRate = weightOnWheels
+      ? 0
+      : learnPitch
+        ? limit(
+            this.pitchTrimRate * (1 - dt / PITCH_TRIM_RATE_TAU) - PITCH_NZ_II * nzError * commandScale * dt,
+            -PITCH_TRIM_RATE_MAX,
+            PITCH_TRIM_RATE_MAX,
+          )
+        : this.pitchTrimRate * (1 - dt / PITCH_TRIM_RATE_TAU)
+    const unclamped = this.pitchIntegrator - PITCH_NZ_I * nzError * commandScale * dt + this.pitchTrimRate * dt
+    this.pitchIntegrator = limit(unclamped, SimulationConstants.ELEVATOR_MIN, SimulationConstants.ELEVATOR_MAX)
+    // against a stop it has no rate to learn either
+    if (unclamped !== this.pitchIntegrator) this.pitchTrimRate = 0
 
     /* %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
        roll: roll rate command
@@ -476,10 +521,17 @@ export default class FlightControlSystem {
     const pCommand = input.rollStick * SimulationConstants.ROLL_RATE_MAX * rollAuthority
 
     /* Positive aileron rolls left, so a roll to the right needs a negative
-       deflection. No integrator here - a rate command does not need one, and
-       the small standing deflection the airframe asymmetry calls for is what
-       the aileron trim constant is for. */
-    this.commands.aileron = SimulationConstants.AILERON_TRIM - ROLL_P * (pCommand - p) * lateralScale
+       deflection. The trim constant carries the standing deflection the
+       airframe's asymmetry calls for at one speed, and the integrator the
+       rest - see ROLL_I. Not on the ground, where the wheels hold the wings. */
+    const learnRoll = Math.abs(input.rollStick) < TRIM_LEARN_STICK && Math.abs(pCommand - p) < TRIM_LEARN_P_ERROR
+    this.rollIntegrator = weightOnWheels
+      ? 0
+      : learnRoll
+        ? limit(this.rollIntegrator - ROLL_I * (pCommand - p) * lateralScale * dt, -ROLL_I_MAX, ROLL_I_MAX)
+        : this.rollIntegrator
+    this.commands.aileron =
+      SimulationConstants.AILERON_TRIM + this.rollIntegrator - ROLL_P * (pCommand - p) * lateralScale
 
     /* Same rate error, same sign convention - positive is a differential
        deflection that rolls left, matching the aileron above so the two

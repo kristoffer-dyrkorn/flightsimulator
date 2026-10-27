@@ -110,6 +110,14 @@ let gearDown = false
 // subsequent takeoff all require a fresh safe touch of their own.
 let onGround = false
 
+// The sink rate at the moment the tyres first touch, ft/min - caught in the
+// physics loop, at the last step before the landing gear model takes weight,
+// and cleared once it takes none again. The ground check runs only every
+// 200 ms, and judged by the sink rate it found then, a touchdown often
+// passed long after the struts had taken out much of the descent: a 800
+// ft/min arrival, over the limit, read as 450 a tenth of a second later.
+let touchdownSinkRate = null
+
 // hard pause - freezes physics, camera motion, terrain streaming, and
 // rendering entirely (drawScene below returns immediately once this is
 // set, before touching any of them). previousFrameTime keeps advancing
@@ -227,6 +235,13 @@ const COCKPIT_SHADOW_NORMAL_BIAS = 0.1
 const MAX_GROUND_SHADOW_HEIGHT = 500
 const GROUND_SHADOW_MARGIN = 100
 const GROUND_SHADOW_OPACITY = 0.5
+// With the aircraft on its wheels the shadow under it is softened, its edge
+// blurred over this radius - eased in over GROUND_SHADOW_SOFTEN_TIME as the
+// gear takes the weight, and back out after lift off. In flight it keeps the
+// shadow map's own sharp edge.
+const GROUND_SHADOW_SOFTNESS = 0.35 // m
+const GROUND_SHADOW_SOFTEN_TIME = 0.4 // s, time constant
+let groundShadowSoftness = 0 // m
 // and only with the sun at least this high (sine of 5 degrees) - a lower
 // sun casts the shadow kilometres away from the aircraft, and stretched out
 // long and faint
@@ -522,7 +537,7 @@ function updateSun() {
 // terrain below. So the sunlight on the aircraft dims with the sun's height
 // the same way: by how much less of it level ground gets than with the sun
 // at SUNLIGHT_REFERENCE_ELEVATION.
-sky.onUpdate = () => { console.log("F-16 ADAPT " + sky.adaptation.toFixed(4) + " sun " + sky.sunElevation.toFixed(2)) // TEMP
+sky.onUpdate = () => {
   Tile.light.setRGB(...sky.groundLight)
   for (const part of cockpitInteriorParts) {
     if (!part.flatMaterial) continue
@@ -788,7 +803,9 @@ function evaluateLandingConditions() {
     closestWheelClearance,
     wheelsNearGround: touchingWheels > 0,
     gearDown,
-    sinkRate: airplaneState.sinkRate, // ft/min, positive = descending
+    // ft/min, positive = descending - as the tyres touched, once they have
+    // (see touchdownSinkRate)
+    sinkRate: touchdownSinkRate ?? airplaneState.sinkRate,
     bank: Math.abs(airplaneState.phi * SimulationConstants.RTOD), // deg
     onRunway: touchingWheels > 0 && touchingWheelsOnRunway === touchingWheels,
   }
@@ -992,6 +1009,10 @@ function drawScene(currentFrametime) {
     previousAirplaneState.copyFrom(airplaneState)
 
     integrator.step(f16simulation, controlActuators, airplaneState, PHYSICS_STEP)
+
+    // see touchdownSinkRate
+    if (!f16simulation.landingGearModel.weightOnWheels) touchdownSinkRate = null
+    else if (touchdownSinkRate === null) touchdownSinkRate = previousAirplaneState.sinkRate
     physicsTimeDebt -= PHYSICS_STEP
     steps++
   }
@@ -1039,6 +1060,10 @@ function drawScene(currentFrametime) {
   directionalLight.position.copy(f16.position).addScaledVector(sunDirection, SHADOW_LIGHT_DISTANCE)
   ambientLight.position.copy(f16.position).add(UP)
   updateGroundShadow()
+  // see GROUND_SHADOW_SOFTNESS
+  const softnessTarget = f16simulation.landingGearModel.weightOnWheels ? GROUND_SHADOW_SOFTNESS : 0
+  groundShadowSoftness += (softnessTarget - groundShadowSoftness) * (1 - Math.exp(-(frameTime * 0.001) / GROUND_SHADOW_SOFTEN_TIME))
+  groundShadow.setSoftness(groundShadowSoftness < 0.01 ? 0 : groundShadowSoftness / (2 * SHADOW_EXTENT))
 
   chaseObject.update(f16, frameTime)
 
@@ -1060,6 +1085,7 @@ function drawScene(currentFrametime) {
   }
 
   terrain.update(camera, showWireFrame)
+  terrain.sceneryLights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio())
   terrain.runways.lights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio(), cameras[0].position, performance.now() / 1000)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
   f16Rig?.setEngine(renderState.pow, sky.adaptation)
