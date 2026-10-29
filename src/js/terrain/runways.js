@@ -106,10 +106,14 @@ const RUNWAY_TILES = new Set([
  */
 
 export default class RunwayRegistry {
-  constructor(scene) {
+  /**
+   * @param scene         the terrain's scene
+   * @param groundHeight  see RunwayLights
+   */
+  constructor(scene, groundHeight) {
     // the runways' lights, shown while their tiles are loaded - see
     // runwayLights.js
-    this.lights = new RunwayLights(scene)
+    this.lights = new RunwayLights(scene, groundHeight)
     // tileName -> the file's features, for the lights, once fetched
     this.features = new Map()
     // every runway threshold read so far, in the scene's coordinates - the

@@ -1,4 +1,5 @@
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, ShaderMaterial } from "three"
+import { lightStreaks, streakFragmentPars, streakVertex, streakVertexPars } from "./lightStreaks.js"
 
 /*
  * The runways' lights - approach, threshold, edge, centreline, touchdown
@@ -121,6 +122,10 @@ const HAZE_SHARE = 0.35
 // GLOW_GROWTH for every doubling.
 const GLOW_GROWTH = 0.35
 
+// how much brighter a light is drawn towards the edges of the view, at most
+// - see EDGE_GAIN_MAX in sceneryLights.js
+const EDGE_GAIN_MAX = 2.5
+
 // the lights are drawn this share of their distance nearer the camera, so
 // the terrain they stand on never hides them where the depth buffer's
 // resolution runs out, far off
@@ -138,6 +143,7 @@ const vertexShader = /* glsl */ `
   attribute float omni;
   attribute float intensity;
   attribute float flash; // a flasher's place in its run, 0 to 1 - or -1
+  ${streakVertexPars}
 
   varying vec3 vColor;
 
@@ -156,7 +162,10 @@ const vertexShader = /* glsl */ `
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(intensity);
     float falloff = min(1.0, (range * range) / (distance * distance));
     float haze = exp(-hazeDensity * ${HAZE_SHARE.toFixed(3)} * distance);
-    float energy = brightness * intensity * directional * falloff * haze;
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    float offAxis = -viewPosition.z / length(viewPosition.xyz);
+    float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});
+    float energy = brightness * intensity * directional * falloff * haze * edgeGain;
     vColor = color * min(energy, 1.0);
 
     // a sequenced flasher, lit for its moment of the run - see SFL_RATE
@@ -174,18 +183,20 @@ const vertexShader = /* glsl */ `
     gl_PointSize *= 1.0 + ${GLOW_GROWTH.toFixed(2)} * log2(max(energy * lit, 1.0));
     if (flash >= 0.0) gl_PointSize *= ${SFL_SIZE.toFixed(1)};
     if (directional * falloff * haze * lit < 0.002) gl_PointSize = 0.0;
+    ${streakVertex}
   }
 `
 
 const fragmentShader = /* glsl */ `
   varying vec3 vColor;
+  ${streakFragmentPars}
 
   void main() {
-    // a bright core with a soft glow round it
-    float r = length(gl_PointCoord - 0.5) * 2.0;
+    // a bright core with a soft glow round it, drawn along its streak
+    float r = streakDistance();
     if (r > 1.0) discard;
     float glow = exp(-r * r * 5.0) + 0.6 * (1.0 - smoothstep(0.0, 0.35, r));
-    gl_FragColor = vec4(vColor * glow, 1.0);
+    gl_FragColor = vec4(vColor * glow * vStreakShare, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -230,6 +241,13 @@ const SLOPE_OMNI = 0.03
 const SLOPE_DAY_BRIGHTNESS = 0.5
 // the fitting's height over the runway
 const FITTING_HEIGHT = 0.3 // m
+// The units stand at the runway's height, which their angles are measured
+// from - but the terrain beside a runway can lie a couple of meters higher
+// than the runway itself: 5.0-5.6 m beside Molde's runway 07 on its north
+// side, against 3.0 m on it. Drawn there, they were inside the terrain, and
+// the rising ground hid them on short final. So once the terrain's height
+// there is known, each unit is drawn on the terrain where that is higher -
+// its colours still worked out from where it stands. See groundSlopeIndicators.
 
 const slopeVertexShader = /* glsl */ `
   uniform float pixelRatio;
@@ -242,6 +260,8 @@ const slopeVertexShader = /* glsl */ `
   attribute vec2 beam;
   attribute float setting; // degrees above the horizontal
   attribute float plasi; // 1 for a PLASI, 0 for a PAPI or APAPI unit
+  attribute vec3 standing; // where it stands, which its angles are from
+  ${streakVertexPars}
 
   varying vec3 vColor;
 
@@ -249,7 +269,7 @@ const slopeVertexShader = /* glsl */ `
   const vec3 red = vec3(${COLOURS.red.toArray().map((v) => v.toFixed(3)).join(", ")});
 
   void main() {
-    vec3 toPilot = pilot - position;
+    vec3 toPilot = pilot - standing;
     float seenAt = degrees(atan(toPilot.z, length(toPilot.xy)));
     float off = seenAt - setting;
 
@@ -274,7 +294,10 @@ const slopeVertexShader = /* glsl */ `
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(${SLOPE_INTENSITY.toFixed(2)});
     float falloff = min(1.0, (range * range) / (distance * distance));
     float haze = exp(-hazeDensity * ${HAZE_SHARE.toFixed(3)} * distance);
-    float energy = brightness * ${SLOPE_INTENSITY.toFixed(2)} * strength * directional * falloff * haze;
+    vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
+    float offAxis = -viewPosition.z / length(viewPosition.xyz);
+    float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});
+    float energy = brightness * ${SLOPE_INTENSITY.toFixed(2)} * strength * directional * falloff * haze * edgeGain;
     vColor = colour * min(energy, 1.0);
 
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
@@ -283,6 +306,7 @@ const slopeVertexShader = /* glsl */ `
     gl_PointSize = pixelRatio * clamp(${SIZE_AT_1M.toFixed(1)} / distance, ${MIN_SIZE.toFixed(1)}, ${MAX_SIZE.toFixed(1)});
     gl_PointSize *= 1.0 + ${GLOW_GROWTH.toFixed(2)} * log2(max(energy, 1.0));
     if (directional * falloff * haze < 0.002) gl_PointSize = 0.0;
+    ${streakVertex}
   }
 `
 
@@ -341,8 +365,14 @@ function flashers(feature) {
 }
 
 export default class RunwayLights {
-  constructor(scene) {
+  /**
+   * @param scene         the terrain's scene
+   * @param groundHeight  (tileName, x, y) -> the terrain's height there, tile-
+   *                      local, or null while that tile's terrain isn't ready
+   */
+  constructor(scene, groundHeight = () => null) {
     this.scene = scene
+    this.groundHeight = groundHeight
     // tileName -> the tile's point cloud, while it is loaded
     this.clouds = new Map()
     this.uniforms = {
@@ -421,7 +451,7 @@ export default class RunwayLights {
     geometry.setAttribute("flash", new BufferAttribute(new Float32Array(flashes), 1))
 
     // each cloud has its own camera position, tile-local
-    const uniforms = { ...this.uniforms, eye: { value: new Float32Array(3) } }
+    const uniforms = { ...this.uniforms, ...lightStreaks.uniforms(), eye: { value: new Float32Array(3) } }
     const material = new ShaderMaterial({
       uniforms,
       vertexShader,
@@ -451,6 +481,22 @@ export default class RunwayLights {
       cloud.material.dispose()
       clouds.delete(tileName)
     }
+  }
+
+  // Sets a tile's slope indicators on the terrain where that lies higher than
+  // where they stand - once its terrain is ready. See FITTING_HEIGHT.
+  groundSlopeIndicators(cloud) {
+    const standing = cloud.geometry.attributes.standing
+    const heights = []
+    for (let i = 0; i < standing.count; i++) {
+      const height = this.groundHeight(cloud.userData.tileName, standing.getX(i), standing.getY(i))
+      if (height === null) return
+      heights.push(height)
+    }
+    const position = cloud.geometry.attributes.position
+    heights.forEach((height, i) => position.setZ(i, Math.max(standing.getZ(i), height + FITTING_HEIGHT)))
+    position.needsUpdate = true
+    cloud.userData.grounded = true
   }
 
   // see SLOPE_INDICATORS
@@ -530,6 +576,7 @@ export default class RunwayLights {
     geometry.setAttribute("beam", new BufferAttribute(new Float32Array(beams), 2))
     geometry.setAttribute("setting", new BufferAttribute(new Float32Array(settings), 1))
     geometry.setAttribute("plasi", new BufferAttribute(new Float32Array(plasis), 1))
+    geometry.setAttribute("standing", new BufferAttribute(new Float32Array(positions), 3))
 
     const material = new ShaderMaterial({
       uniforms: {
@@ -539,6 +586,7 @@ export default class RunwayLights {
         time: this.time,
         eye: { value: new Float32Array(3) },
         pilot: { value: new Float32Array(3) },
+        ...lightStreaks.uniforms(),
       },
       vertexShader: slopeVertexShader,
       fragmentShader,
@@ -553,6 +601,8 @@ export default class RunwayLights {
     cloud.renderOrder = 1
     cloud.userData.corner = [x, y]
     this.scene.add(cloud)
+    cloud.userData.tileName = tileName
+    cloud.userData.grounded = false
     this.slopeClouds.set(tileName, cloud)
   }
 
@@ -570,6 +620,8 @@ export default class RunwayLights {
     this.slopeBrightness.value = Math.max(SLOPE_DAY_BRIGHTNESS, this.uniforms.brightness.value)
     this.time.value = time
     for (const cloud of this.slopeClouds.values()) {
+      if (!cloud.userData.grounded) this.groundSlopeIndicators(cloud)
+      lightStreaks.updateCloud(cloud)
       const [x, y] = cloud.userData.corner
       cloud.material.uniforms.eye.value.set([camera.position.x - x, camera.position.y - y, camera.position.z])
       cloud.material.uniforms.pilot.value.set([pilotEye.x - x, pilotEye.y - y, pilotEye.z])
@@ -577,6 +629,7 @@ export default class RunwayLights {
     this.uniforms.hazeDensity.value = hazeDensity
     this.uniforms.pixelRatio.value = pixelRatio
     for (const cloud of this.clouds.values()) {
+      lightStreaks.updateCloud(cloud)
       const [x, y] = cloud.userData.corner
       cloud.material.uniforms.eye.value.set([camera.position.x - x, camera.position.y - y, camera.position.z])
     }

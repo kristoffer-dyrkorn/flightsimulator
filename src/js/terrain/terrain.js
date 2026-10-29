@@ -1,10 +1,14 @@
 import Tile from "./tile.js"
-import { Vector3 } from "three"
+import { Ray, Vector3 } from "three"
 import { GenerateMeshBVHWorker } from "../externals/workers/GenerateMeshBVHWorker.js"
 import RunwayRegistry from "./runways.js"
 import SceneryLights from "./sceneryLights.js"
 
 const TILE_EXTENTS = 50 * 255
+
+// see groundHeight - straight down from well above the highest ground
+const GROUND_RAY_FROM = 3000 // m
+const groundRay = new Ray(new Vector3(), new Vector3(0, -1, 0))
 
 export default class Terrain {
   constructor(scene, minx, miny, maxx, maxy, renderer) {
@@ -16,7 +20,7 @@ export default class Terrain {
     // runway legality polygons for the tiles that are currently loaded -
     // see runways.js. Owned here, alongside the tiles themselves, since
     // it's kept in step with exactly the same load/unload lifecycle.
-    this.runways = new RunwayRegistry(scene)
+    this.runways = new RunwayRegistry(scene, (tileName, x, y) => this.groundHeight(tileName, x, y))
 
     // lights from buildings and roads at night, shown while their tiles
     // are loaded - see sceneryLights.js
@@ -51,6 +55,20 @@ export default class Terrain {
         tile.load()
       }
     }, 100)
+  }
+
+  /**
+   * The terrain's height at a point in a tile, tile-local easting and
+   * northing - or null while the tile's terrain, or the BVH it is looked up
+   * with, isn't ready.
+   */
+  groundHeight(tileName, x, y) {
+    const geometry = this.tiles.get(tileName)?.tileMesh.geometry
+    if (!geometry?.boundsTree) return null
+    // the tile's mesh is y up, with northing along -z - see tile.js
+    groundRay.origin.set(x, GROUND_RAY_FROM, -y)
+    const hit = geometry.boundsTree.raycastFirst(groundRay)
+    return hit ? GROUND_RAY_FROM - hit.distance : null
   }
 
   update(camera, showWireFrame) {

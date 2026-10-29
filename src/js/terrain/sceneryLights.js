@@ -1,5 +1,6 @@
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, ShaderMaterial } from "three"
 import { SERVER } from "./tile.js"
+import { lightStreaks, streakFragmentPars, streakVertex, streakVertexPars } from "./lightStreaks.js"
 
 /*
  * Lights on the ground at night - from buildings, and street lights along
@@ -9,24 +10,20 @@ import { SERVER } from "./tile.js"
  * A building's light is grouped by the building's category and size, a
  * street light by the road's class.
  *
+ * Every terrain tile's file is asked for when the tile loads - most of the
+ * country has none, and a missing one is no lights, not an error: a 404 or
+ * 403 (what S3 answers for a file that isn't there), or anything that isn't
+ * JSON (what a development server answers with its index page). Each file
+ * is asked for once while its tile stays loaded. That there is none is
+ * remembered for good; a tile's lights are let go with the tile, and asked
+ * for again - usually from the browser's cache - if it loads again, so a
+ * long flight across the country doesn't pile them up in memory.
+ *
  * Each tile's lights are one point cloud, placed at the tile's corner as the
  * terrain is, so their own coordinates stay small, shown while the tile is
  * loaded. They shine the same way all round, and fade in as the sun sets -
  * see brightnessFor.
  */
-
-// tileName + ".json" for every tile with a file - only these are fetched
-const SCENERY_TILES = new Set([
-  "104000-6961000.json",
-  "104000-6973750.json",
-  "104000-6986500.json",
-  "116750-6961000.json",
-  "116750-6973750.json",
-  "116750-6986500.json",
-  "91250-6961000.json",
-  "91250-6973750.json",
-  "91250-6986500.json",
-])
 
 // Colours: homes and cabins warm, as their windows are; workplaces and
 // public buildings a cooler white, as their fluorescent and LED lighting;
@@ -72,6 +69,14 @@ const FULL_AT_ADAPTATION = 10
 const SIZE_AT_1M = 120
 const MIN_SIZE = 1.5
 const MAX_SIZE = 6
+// A wide view stretches its edges: a light there takes up more of the
+// screen's area per degree of view, by 1/cos^3 of its angle off the view's
+// axis - some three times at 45 degrees - so with every light drawn the
+// same few pixels, the lights thinned out and dimmed towards the edges, and
+// bunched up brighter in the middle. So each is made brighter by that much,
+// up to EDGE_GAIN_MAX, which keeps the light per area of screen the same.
+const EDGE_GAIN_MAX = 2.5
+
 // drawn this share of their distance nearer the camera, so the terrain they
 // stand on doesn't hide them far off - see runwayLights.js
 const DEPTH_PULL = 0.003
@@ -99,33 +104,40 @@ const vertexShader = /* glsl */ `
   attribute float strength;
 
   varying vec3 vColor;
+  ${streakVertexPars}
 
   void main() {
     float distance = length(eye - position);
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(strength);
     float falloff = min(1.0, range / distance);
     float haze = exp(-hazeDensity * ${HAZE_SHARE.toFixed(3)} * distance);
-    float energy = brightness * strength * falloff * haze;
+    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+    // see EDGE_GAIN_MAX
+    float offAxis = -mvPosition.z / length(mvPosition.xyz);
+    float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});
+
+    float energy = brightness * strength * falloff * haze * edgeGain;
     // never brighter than its own colour, or it clips to white on screen
     vColor = color * min(energy, 1.0);
 
-    vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     mvPosition.xyz *= 1.0 - ${DEPTH_PULL.toFixed(4)};
     gl_Position = projectionMatrix * mvPosition;
     gl_PointSize = pixelRatio * clamp(${SIZE_AT_1M.toFixed(1)} / distance, ${MIN_SIZE.toFixed(1)}, ${MAX_SIZE.toFixed(1)});
     if (energy < 0.01) gl_PointSize = 0.0;
+    ${streakVertex}
   }
 `
 
 const fragmentShader = /* glsl */ `
   varying vec3 vColor;
+  ${streakFragmentPars}
 
   void main() {
-    // a small bright core with a soft glow round it
-    float r = length(gl_PointCoord - 0.5) * 2.0;
+    // a small bright core with a soft glow round it, drawn along its streak
+    float r = streakDistance();
     if (r > 1.0) discard;
     float glow = exp(-r * r * 6.0);
-    gl_FragColor = vec4(vColor * glow, 1.0);
+    gl_FragColor = vec4(vColor * glow * vStreakShare, 1.0);
     #include <tonemapping_fragment>
     #include <colorspace_fragment>
   }
@@ -139,6 +151,7 @@ export default class SceneryLights {
     // tileName -> its file's fetch, once started
     this.fetches = new Map()
     this.active = new Set()
+    this.level = 0
     this.uniforms = {
       pixelRatio: { value: 1 },
       brightness: { value: 0 },
@@ -153,13 +166,16 @@ export default class SceneryLights {
    */
   load(tileName) {
     this.active.add(tileName)
-    if (!SCENERY_TILES.has(`${tileName}.json`)) return
     if (!this.fetches.has(tileName)) {
       this.fetches.set(
         tileName,
         fetch(`${SERVER}/scenery/${tileName}.json`)
-          .then((response) => (response.ok ? response.json() : null))
-          .then((geojson) => geojson?.features ?? null)
+          .then((response) => {
+            // see the comment at the top: anything but a JSON file is no lights
+            const json = (response.headers.get("content-type") ?? "").includes("json")
+            return response.ok && json ? response.json() : null
+          })
+          .then((geojson) => (Array.isArray(geojson?.features) && geojson.features.length > 0 ? geojson.features : null))
           .catch(() => null),
       )
     }
@@ -171,6 +187,11 @@ export default class SceneryLights {
   /** Hides a tile's lights - call when the tile is unloaded. */
   unload(tileName) {
     this.active.delete(tileName)
+    // forget its lights, keeping only that a tile has none - see the top
+    const fetched = this.fetches.get(tileName)
+    fetched?.then((features) => {
+      if (features && !this.active.has(tileName) && this.fetches.get(tileName) === fetched) this.fetches.delete(tileName)
+    })
     const cloud = this.clouds.get(tileName)
     if (!cloud) return
     this.scene.remove(cloud)
@@ -210,7 +231,7 @@ export default class SceneryLights {
     geometry.setAttribute("strength", new BufferAttribute(new Float32Array(strengths), 1))
 
     const material = new ShaderMaterial({
-      uniforms: { ...this.uniforms, eye: { value: new Float32Array(3) } },
+      uniforms: { ...this.uniforms, ...lightStreaks.uniforms(), eye: { value: new Float32Array(3) } },
       vertexShader,
       fragmentShader,
       transparent: true,
@@ -236,10 +257,13 @@ export default class SceneryLights {
   update(camera, adaptation, hazeDensity, pixelRatio) {
     const brightness = brightnessFor(adaptation)
     this.uniforms.brightness.value = brightness
+    // how far on they are, 0 to 1 - for the aircraft's own lights too
+    this.level = brightness / BRIGHTNESS
     this.uniforms.hazeDensity.value = hazeDensity
     this.uniforms.pixelRatio.value = pixelRatio
     for (const cloud of this.clouds.values()) {
       cloud.visible = brightness > 0
+      lightStreaks.updateCloud(cloud)
       const [x, y] = cloud.userData.corner
       cloud.material.uniforms.eye.value.set([camera.position.x - x, camera.position.y - y, camera.position.z])
     }

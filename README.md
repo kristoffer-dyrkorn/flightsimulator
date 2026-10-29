@@ -31,7 +31,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 - `z` and `x`: rudder (nose gear control when on a runway)
 - `b` wheel brakes when on a runway
 - `h`: toggle HUD on and off
-- `t`: toggle turbulence and wind on and off
+- `t`: toggle wind and turbulence on and off
 - `n` and `m`: move the time of day 15 minutes back / forward
 - space bar: cycle views (cockpit view / follower camera / external camera)
 - `j` and `l`: rotate the cockpit view or external camera left and right
@@ -45,6 +45,8 @@ You can land the plane on any of Norway's runways. For a successful landing you 
 The flight control system has a "landing mode", enabled when the landing gear is extended. When in landing mode, the heading indicator (showing compass direction) will move to the top of the HUD, and a vertical bar (approach bracket) will appear below the horizon. On approach, try to place the flight path indicator (the circle with horizontal and vertical lines on it) in the middle of the approach bar.
 
 To start the approach, slow down the aircraft and extend the landing gears below around 250 knots. Also apply full air brakes. Adjust the throttle and the attitude of the plane until you get a speed of between 150 and 170 knots and an angle of attack of 12 to 13 degrees. Then the aircraft will be set up for a correct glide path.
+
+Be aware that at touch down the sink rate should be less than 600 ft/min. In landing mode there is an indicator on the right side, next to the altitude meter, that shows the climb rate/sink rate, measured in 1000 ft/min. At touchdown the pointer should be close to - or above - the first tick below zero.
 
 You will need to flare before touchdown. Just before touchdown, set the throttle to idle and then apply wheel brakes when you are on the ground.
 
@@ -73,6 +75,7 @@ Features after July 2025 have been made using AI.
 - Added varying engine nozzle radius and engine glow, along with afterburner plumes
 - Added simple cockpit panel
 - Updated to latest version of three.js
+- Added aircraft lights and lights from buildings and roads at dusk/dawn or night
 
 #### September 2026:
 
@@ -146,6 +149,7 @@ Features after July 2025 have been made using AI.
 - F16 aircraft model is by [klgaming2024](https://www.cgtrader.com/free-3d-models/aircraft/jet/f16-fighting-falcon-ed478eeb-d215-4b40-834f-8df27079b859)
 - Cockpit front panel is based on "F16C Block 50/52 + Cockpit" by [graphXDoses](https://sketchfab.com/3d-models/f16c-block-5052-cockpit-83fb3b74c97d46febda2813331de168d)
 - The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
+- Road and building geometries are from [OpenStreetMap](https://openstreetmap.org/copyright) (ODbL License)
 
 ## License
 

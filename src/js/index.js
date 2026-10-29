@@ -1,5 +1,7 @@
 import Tile from "./terrain/tile.js"
 import Terrain from "./terrain/terrain.js"
+import { lightStreaks } from "./terrain/lightStreaks.js"
+import F16Lights from "./graphics/f16Lights.js"
 import {
   WebGLRenderer,
   Scene,
@@ -411,6 +413,10 @@ loadAircraftModel(f16)
 // to be sent to the "chase camera"
 const chaseObject = new ChaseObject(f16)
 
+// the aircraft's exterior lights, on at night and seen from outside - see
+// graphics/f16Lights.js
+const f16Lights = new F16Lights(f16)
+
 // read out start position and direction
 const url = new URL(document.location)
 const urlParams = url.searchParams
@@ -700,6 +706,9 @@ function terrainClearanceBelow(worldPosition) {
 
 // where on the ground (scene x and y) the aircraft's shadow is
 const groundShadowCenter = new Vector2()
+
+// the drawing buffer's size, pixels, for the lights' streaks
+const drawingBufferSize = new Vector2()
 
 // stretch the shadow camera down to the ground below the aircraft, and
 // pick the terrain tiles its shadow falls on
@@ -1085,7 +1094,12 @@ function drawScene(currentFrametime) {
   }
 
   terrain.update(camera, showWireFrame)
+  // see lightStreaks.js
+  renderer.getDrawingBufferSize(drawingBufferSize)
+  // no streaks from the cockpit
+  lightStreaks.update(cameras[currentCamera], drawingBufferSize.x, drawingBufferSize.y, currentCamera !== 0)
   terrain.sceneryLights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio())
+  f16Lights.update(terrain.sceneryLights.level, currentCamera !== 0, controlActuators.gear, performance.now() / 1000, renderer.getPixelRatio())
   terrain.runways.lights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio(), cameras[0].position, performance.now() / 1000)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
   f16Rig?.setEngine(renderState.pow, sky.adaptation)
