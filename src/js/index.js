@@ -27,6 +27,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import StateVector from "./hifimodel/statevector.js"
 import InputVector, { STICK_STEP, THROTTLE_STEP } from "./hifimodel/inputvector.js"
 import F16Simulation from "./hifimodel/f16simulation.js"
+import { FUEL_CAPACITY } from "./hifimodel/models/fuelmodel.js"
 import WindField from "./hifimodel/models/windfield.js"
 import { boundaryLayerFactor } from "./hifimodel/models/windmodel.js"
 import NowcastWind from "./weather/nowcast.js"
@@ -45,6 +46,9 @@ import { sunPosition, twilight } from "./sky/sun.js"
 import { sunTransmittance, haze, luminance, GROUND_ALBEDO } from "./sky/atmosphere.js"
 import SkyDome from "./sky/SkyDome.js"
 import { updateHorizonFog } from "./sky/horizonFog.js"
+import { updateLandingLight } from "./graphics/landingLight.js"
+import FlightRecorder from "./replay/flightRecorder.js"
+import { describeCrash } from "./crashReport.js"
 import proj4 from "proj4"
 
 // terrain boundaries, in UTM33 coordinates
@@ -112,13 +116,23 @@ let gearDown = false
 // subsequent takeoff all require a fresh safe touch of their own.
 let onGround = false
 
-// The sink rate at the moment the tyres first touch, ft/min - caught in the
-// physics loop, at the last step before the landing gear model takes weight,
-// and cleared once it takes none again. The ground check runs only every
-// 200 ms, and judged by the sink rate it found then, a touchdown often
-// passed long after the struts had taken out much of the descent: a 800
-// ft/min arrival, over the limit, read as 450 a tenth of a second later.
-let touchdownSinkRate = null
+// A touchdown waiting to be judged - see judgeTouchdown: caught in the
+// physics loop, at the step the tyres first reach the ground, with the sink
+// rate, bank and gear as they were then, and which tyres touched. If the
+// aircraft bounces and touches again before it is judged, the harder of the
+// two is kept. Judged every frame, after the physics has run - not by a
+// periodic check against the rendered wheels, which missed a hard arrival
+// that bounced clear again between two checks, and then judged the gentle
+// second touch instead.
+let touchdown = null
+// whether any tyre is on the ground, as of the last physics step
+let wheelsTouching = false
+// why the aircraft has crashed, if it has, as values for crash - set in the
+// physics loop (see HARD_POINTS in landinggearmodel.js), acted on once it
+// has run
+let crashReason = null
+// the aircraft's nose direction, for the glide slope indicator
+const glideForward = new Vector3()
 
 // hard pause - freezes physics, camera motion, terrain streaming, and
 // rendering entirely (drawScene below returns immediately once this is
@@ -127,6 +141,23 @@ let touchdownSinkRate = null
 // a normal small frameTime rather than the whole paused duration landing
 // on the simulation in one burst.
 let paused = false
+
+// The last 2 minutes of flight, recorded frame by frame while the
+// simulation runs, and replayed on request while it is paused - see
+// FlightRecorder. During a replay the view is drawn from the recording, and
+// the cameras work as in flight; the simulation itself stays where it was
+// paused, to carry on from once the replay is left.
+const flightRecorder = new FlightRecorder()
+// seconds of flight so far, not counting time paused - the recording's clock
+let flightTime = 0
+// playing, or held at a moment - see the replay controls
+const replay = { active: false, time: 0, playing: false }
+// once crashed, the simulation stays paused, with the crash screen over
+// the scene - see crash - and the flight can only be replayed
+let crashed = false
+// paused, but draw one frame anyway - after leaving a replay, or switching
+// cameras, so the view shows it
+let redrawWhilePaused = false
 
 // ray for intersection testing with ground, direction is in GLB coordinates (y up)
 const interSectionRay = new Ray(new Vector3(0, 0, 0), new Vector3(0, -1, 0))
@@ -438,6 +469,9 @@ const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
 // the corners of the terrain tiles
 const windField = new WindField(TILE_EXTENTS, MINX, MINY)
 const f16simulation = new F16Simulation(windField)
+// the fuel aboard to start with, percent of a full internal load - see
+// fuelmodel.js; 80 unless given
+if (urlParams.has("fuel")) f16simulation.fuelModel.setFuel((+urlParams.get("fuel") / 100) * FUEL_CAPACITY)
 const airplaneState = new StateVector()
 airplaneState.init(startPoint, startDirection)
 
@@ -684,6 +718,13 @@ setInterval(() => {
 // how far straight down it is to the terrain surface below a world position
 // (in the scene's own UTM33-meters coordinates), or null if the tile
 // underneath it hasn't loaded yet
+// Rays down to the terrain start this far above the point they measure
+// from, so that a point already below the terrain's surface still finds it,
+// as a negative clearance - started at the point itself, a wheel that had
+// sunk through the runway found nothing above it, and its touchdown was
+// never seen.
+const RAY_START_ABOVE = 100 // m
+
 function terrainClearanceBelow(worldPosition) {
   const tileXOffset = (worldPosition.x - MINX) % TILE_EXTENTS
   const x = Math.round(worldPosition.x - tileXOffset)
@@ -698,10 +739,27 @@ function terrainClearanceBelow(worldPosition) {
 
   // set ray origin to the query position, in the tile's own local
   // coordinates, and convert from z up to the GLB's y up
-  interSectionRay.origin.set(tileXOffset, worldPosition.z, -tileYOffset)
+  interSectionRay.origin.set(tileXOffset, worldPosition.z + RAY_START_ABOVE, -tileYOffset)
 
   const hit = tile.tileMesh.geometry.boundsTree.raycastFirst(interSectionRay)
-  return hit ? hit.distance : null
+  return hit ? hit.distance - RAY_START_ABOVE : null
+}
+
+// The ground's height below the aircraft, for the landing gear model - and
+// the height above it. Every frame: read only every 200 ms, as it was, the
+// ground the gear stood on was up to 15 m behind on an approach, and a step
+// in the terrain at a runway's threshold put the wheels through the runway
+// before the gear model knew it was there.
+function updateGroundBelow() {
+  aircraftPosition.set(
+    airplaneState.epos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.npos * SimulationConstants.FEET_TO_METERS,
+    airplaneState.alt * SimulationConstants.FEET_TO_METERS,
+  )
+  const clearance = terrainClearanceBelow(aircraftPosition)
+  if (clearance === null) return
+  heightAboveGround = clearance
+  f16simulation.landingGearModel.groundAlt = (aircraftPosition.z - clearance) * SimulationConstants.METERS_TO_FEET
 }
 
 // where on the ground (scene x and y) the aircraft's shadow is
@@ -712,7 +770,7 @@ const drawingBufferSize = new Vector2()
 
 // stretch the shadow camera down to the ground below the aircraft, and
 // pick the terrain tiles its shadow falls on
-function updateGroundShadow() {
+function updateGroundShadow(heightAboveGround) {
   const shadowCamera = directionalLight.shadow.camera
   const tiles = []
   let reach = 0
@@ -772,114 +830,146 @@ function isPositionOnRunway(worldPosition) {
   return terrain.runways.isInsideRunway(`${x}-${y}`, tileXOffset, tileYOffset)
 }
 
-// Every parameter that decides whether a touchdown right now would be
-// judged a safe landing, read fresh each call - shared by the crash check
-// below and the periodic landing-status log, so both are always looking at
-// exactly the same numbers.
-//
-// The wheels checked are where they are with the gear extended, whether it
-// is down or not (see WHEEL_CENTRES in graphics/f16Model.js); that's what
-// lets a gear-up approach still read as "close to the ground" here without
-// it being mistaken for a real touch anywhere this is used.
-//
-// onRunway looks at every wheel that is touching the ground, not just the
-// lowest one - a touchdown with one main wheel on the runway and the other
-// in the grass beside it is not a landing on the runway.
-function evaluateLandingConditions() {
+// the rendered wheel for each of the landing gear model's legs
+const WHEEL_OF_LEG = { nose: "nose", mainL: "left", mainR: "right" }
+
+// those of the given legs whose tyres are not over a mapped runway - with no
+// wheels to go by yet, all of them unless the aircraft is
+function legsOffRunway(legs) {
   const wheels = f16Rig?.wheels
-  let closestWheelClearance = Infinity
-  let touchingWheels = 0
-  let touchingWheelsOnRunway = 0
+  if (!wheels) return isPositionOnRunway(aircraftPosition) ? [] : legs
+  return legs.filter((leg) => {
+    const wheel = wheels[WHEEL_OF_LEG[leg]]
+    return wheel && !isPositionOnRunway(wheel.getWorldPosition(wheelWorldPosition))
+  })
+}
 
-  if (wheels) {
-    for (const wheel of [wheels.nose, wheels.left, wheels.right]) {
-      if (!wheel) continue
+// how far out the gear has to be to count as down, 0 up .. 1 down
+const GEAR_DOWN_POSITION = 0.99
 
-      const clearance = terrainClearanceBelow(wheel.getWorldPosition(wheelWorldPosition))
-      if (clearance === null) continue
-
-      closestWheelClearance = Math.min(closestWheelClearance, clearance)
-
-      if (clearance < SimulationConstants.GEAR_CONTACT_CLEARANCE) {
-        touchingWheels++
-        if (isPositionOnRunway(wheelWorldPosition)) touchingWheelsOnRunway++
-      }
-    }
+// Notes a touchdown - see touchdown. Call from the physics loop, at the
+// step the tyres reach the ground.
+function recordTouchdown(legs) {
+  const arrival = {
+    // ft/min, positive = descending - at the start of the step they touched in
+    sinkRate: previousAirplaneState.sinkRate,
+    bank: Math.abs(previousAirplaneState.phi * SimulationConstants.RTOD), // deg
+    // the handle down, and the gear all the way out - near enough: the
+    // actuator closes in on its command along a lag, and never quite gets
+    // there (see actuatormodel.js)
+    gearDown: gearDown && controlActuators.gear >= GEAR_DOWN_POSITION,
+    gearPosition: controlActuators.gear, // 0 up .. 1 down
+    legs,
   }
-
-  return {
-    hasWheels: !!wheels,
-    closestWheelClearance,
-    wheelsNearGround: touchingWheels > 0,
-    gearDown,
-    // ft/min, positive = descending - as the tyres touched, once they have
-    // (see touchdownSinkRate)
-    sinkRate: touchdownSinkRate ?? airplaneState.sinkRate,
-    bank: Math.abs(airplaneState.phi * SimulationConstants.RTOD), // deg
-    onRunway: touchingWheels > 0 && touchingWheelsOnRunway === touchingWheels,
+  if (!touchdown || arrival.sinkRate > touchdown.sinkRate) {
+    if (touchdown) arrival.legs = [...new Set([...touchdown.legs, ...legs])]
+    touchdown = arrival
+  } else {
+    touchdown.legs = [...new Set([...touchdown.legs, ...legs])]
   }
 }
 
-// Which of evaluateLandingConditions()'s parameters, if any, would turn a
-// touch right now into a crash rather than a landing - the same conditions
-// safeTouch below checks, just spelled out individually so a crash can say
-// what was actually wrong instead of just that one happened.
-function landingFailureReasons(status) {
-  const reasons = []
+// Which of a touchdown's conditions, if any, make it a crash rather than a
+// landing - see touchdown: the values of those that do, for crash, and
+// nothing if it was a landing.
+function landingFailures(arrival) {
+  const failures = {}
+  if (!arrival.gearDown) failures.gear = Math.floor(100 * arrival.gearPosition) // percent extended
+  if (arrival.sinkRate >= SimulationConstants.MAX_SAFE_SINK_RATE) failures.sink = Math.round(arrival.sinkRate)
+  if (arrival.bank >= SimulationConstants.MAX_SAFE_BANK) failures.bank = arrival.bank.toFixed(1)
+  const off = legsOffRunway(arrival.legs)
+  if (off.length > 0) failures.off = off.join(",")
+  return failures
+}
 
-  if (!status.gearDown) reasons.push("landing gear is up")
-  if (status.sinkRate >= SimulationConstants.MAX_SAFE_SINK_RATE) {
-    reasons.push(
-      `sink rate too high (${status.sinkRate.toFixed(1)} ft/min, max ${SimulationConstants.MAX_SAFE_SINK_RATE})`,
-    )
-  }
-  if (status.bank >= SimulationConstants.MAX_SAFE_BANK) {
-    reasons.push(`bank too steep (${status.bank.toFixed(1)} deg, max ${SimulationConstants.MAX_SAFE_BANK})`)
-  }
-  if (!status.onRunway) reasons.push("a wheel is not on a mapped runway")
+// Ends the flight: the simulation stops where it crashed, and the crash
+// screen says why, from the values given, by name - see describeCrash in
+// crashReport.js for which. The last 2 minutes up to the crash can be
+// replayed from there.
+function crash(values) {
+  if (crashed) return
+  crashed = true
+  paused = true
+  console.log("Crash: %s", new URLSearchParams(values).toString())
+  engineSound?.audioContext.suspend()
 
-  return reasons
+  const { reasons, details } = describeCrash(values)
+  document.getElementById("crashreason").textContent = reasons.join(" ")
+  const list = document.getElementById("crashdetails")
+  list.replaceChildren(
+    ...details.map((detail) => {
+      const item = document.createElement("li")
+      item.textContent = detail
+      return item
+    }),
+  )
+  crashScreen.style.display = "flex"
+}
+
+const crashScreen = document.getElementById("crash")
+// let go of the button's focus, so the space bar switches cameras rather
+// than pressing it again
+document.getElementById("crashreplay").addEventListener("click", (event) => {
+  event.currentTarget.blur()
+  startReplay()
+})
+// a fresh start, from the same place
+document.getElementById("flyagain").addEventListener("click", () => document.location.reload())
+
+// The values behind an airframe strike - see HARD_POINTS in
+// landinggearmodel.js: the part, the attitude that put it on the ground,
+// and its own deflection, if it moves
+function strikeValues(part) {
+  const values = { strike: part.replaceAll(" ", "-") }
+  const pitch = (airplaneState.theta * SimulationConstants.RTOD).toFixed(1)
+  if (part.includes("wing tip")) values.bank = (airplaneState.phi * SimulationConstants.RTOD).toFixed(1)
+  else values.pitch = pitch
+  if (part.includes("speedbrake")) values.speedbrake = Math.round(controlActuators.speedbrake)
+  if (part.includes("stabilator")) {
+    values.stabilator = (controlActuators.elevator + (part.includes("left") ? -1 : 1) * controlActuators.stabilatorDiff).toFixed(1)
+  }
+  return values
+}
+
+// Judges what the physics found this frame - see touchdown and
+// HARD_POINTS in landinggearmodel.js. Returns true if the aircraft crashed.
+function judgeGroundContact() {
+  if (crashReason) {
+    crash(crashReason)
+    return true
+  }
+
+  // airborne again - a bounce, a go-around, or a take off: the next touch
+  // has to earn its own safe landing
+  if (onGround && !wheelsTouching && !touchdown) {
+    onGround = false
+    console.log("Airborne - landing conditions will be re-checked on next touch")
+  }
+
+  if (touchdown) {
+    const failures = landingFailures(touchdown)
+    const sinkRate = touchdown.sinkRate
+    touchdown = null
+    if (Object.keys(failures).length > 0) {
+      crash(failures)
+      return true
+    }
+    if (!onGround) console.log("Landed at %s ft/min - rolling on the ground", sinkRate.toFixed(0))
+    onGround = true
+  }
+  return false
 }
 
 // check for ground collision every 200 ms
 setInterval(() => {
   if (paused) return
 
-  const status = evaluateLandingConditions()
-
-  // Airborne again - a bounce, a go-around, or a subsequent takeoff. The
-  // next touch has to earn its own safe landing rather than inheriting
-  // this one's.
-  if (onGround && !status.wheelsNearGround) {
-    onGround = false
-    console.log("Airborne - landing conditions will be re-checked on next touch")
-  }
-
-  // Not yet down: a gear-down touch with a sane sink rate and wings level,
-  // over mapped runway ground, is a landing rather than a crash - judged
-  // once, right here, at the instant the wheels reach the ground. See
-  // runways.js for how "over mapped runway ground" is tracked.
-  if (!onGround && status.wheelsNearGround) {
-    const reasons = landingFailureReasons(status)
-
-    if (reasons.length === 0) {
-      onGround = true
-      console.log("Landed - rolling on the ground")
-    } else {
-      // the wheels are already within GEAR_CONTACT_CLEARANCE of the
-      // ground - effectively touching - without satisfying what makes a
-      // touch safe. That's the crash: wrong attitude, too hard a sink,
-      // gear still up, or simply not over mapped runway ground.
-      console.log("Crash: unsafe touchdown - %s", reasons.join(", "))
-      document.location.href = "collision.html"
-      return
-    }
-  } else if (onGround && !status.onRunway) {
-    // Down and rolling, but a wheel has left the runway - off its end or
-    // side, into the grass or the sea. The runway polygons are the only
-    // ground that's mapped as safe to roll on, so this is a crash too.
-    console.log("Crash: ran off the runway")
-    document.location.href = "collision.html"
+  // Down and rolling, but a wheel has left the runway - off its end or
+  // side, into the grass or the sea. The runway polygons are the only
+  // ground that's mapped as safe to roll on, so this is a crash too.
+  const off = onGround && wheelsTouching ? legsOffRunway(f16simulation.landingGearModel.legsTouching(airplaneState)) : []
+  if (off.length > 0) {
+    crash({ runoff: off.join(",") })
     return
   }
 
@@ -907,55 +997,22 @@ setInterval(() => {
     // set ray origin to the aircraft position
     // use relative coordinates inside the tile to match the geometry's coordinates
     // and convert from z up to y up
-    interSectionRay.origin.set(tileXOffset, aircraftPosition.z, -tileYOffset)
+    interSectionRay.origin.set(tileXOffset, aircraftPosition.z + RAY_START_ABOVE, -tileYOffset)
 
-    // cast a ray from the aircraft position and straight down towards the terrain
+    // cast a ray from above the aircraft and straight down towards the
+    // terrain - see RAY_START_ABOVE
     const hit = tileGeometry.boundsTree.raycastFirst(interSectionRay)
+    if (hit) hit.distance -= RAY_START_ABOVE
 
-    // Ground height tracking runs unconditionally, on- or off-ground alike:
-    // the aircraft keeps moving over (and needing an accurate reading of)
-    // the terrain surface throughout a landing roll, not just up to the
-    // moment of touchdown, so this can no longer live behind the crash
-    // check below the way it used to when a safe touch just ended the tick
-    // early.
-    if (hit) {
-      // register height above ground, for general use
-      heightAboveGround = hit.distance
-
-      // terrain elevation directly below the aircraft, for the landing gear
-      // model's ground reaction - cached here rather than recomputed from
-      // the aircraft's own (fast-changing, mid-descent) altitude each
-      // physics step, since the ground's elevation doesn't move with the
-      // aircraft and this 200ms-updated reading is the only terrain height
-      // available anyway
-      f16simulation.landingGearModel.groundAlt =
-        (aircraftPosition.z - hit.distance) * SimulationConstants.METERS_TO_FEET
-    }
+    // (the ground's height below is kept up to date every frame - see
+    // updateGroundBelow)
 
     // No ground found at all directly below the aircraft - off the edge of
-    // loaded terrain, or already under the mesh - is always a crash,
-    // whatever state the landing gear is in.
+    // loaded terrain, or more than RAY_START_ABOVE under its surface - is
+    // always a crash, whatever state the landing gear is in.
     if (!hit) {
-      console.log(
-        "Crash: no terrain found directly below the aircraft (off the edge of loaded terrain, or already under the surface)",
-      )
-      document.location.href = "collision.html"
+      crash({ terrain: Math.round(airplaneState.alt) })
       return
-    }
-
-    // The distance-from-aircraft "too low" check below is a coarse backstop
-    // for when there's no wheel telemetry yet (the model hasn't
-    // loaded) - once there is, the wheel-based check above already covers
-    // this, more precisely (GEAR_CONTACT_CLEARANCE, not an arbitrary 4 m)
-    // and more completely (three sample points under nose and both main
-    // gear, not one under the aircraft). Left as-is here, this threshold is
-    // measured from the CG, which sits a good 1.7-1.8 m above the wheels
-    // (see landinggearmodel.js's LEGS) - it would fire on every ordinary
-    // approach, well before the wheels themselves ever got close enough to
-    // register a safe touchdown at all.
-    if (!status.hasWheels && hit.distance < 4) {
-      console.log("Crash: too close to terrain (%s m) with no landing gear telemetry yet", hit.distance.toFixed(1))
-      document.location.href = "collision.html"
     }
   }
 }, 200)
@@ -983,8 +1040,48 @@ function drawScene(currentFrametime) {
   let frameTime = currentFrametime - previousFrameTime || 0
   previousFrameTime = currentFrametime
 
-  if (paused) return
+  if (paused && !replay.active && !redrawWhilePaused) return
+  redrawWhilePaused = false
 
+  // what is drawn: the flight as it is now, or, in a replay, as it was
+  let view
+  if (replay.active) {
+    if (replay.playing) {
+      replay.time = Math.min(replay.time + frameTime * 0.001, flightRecorder.newestTime)
+      // at the end it stops, as a film does
+      if (replay.time >= flightRecorder.newestTime) replay.playing = false
+    }
+    view = flightRecorder.sample(replay.time)
+    renderState.copyFrom(view.state)
+    updateReplayControls()
+  } else {
+    if (!paused) flyFrame(frameTime)
+    renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
+    view = liveView()
+    if (!paused) {
+      flightTime += frameTime * 0.001
+      view.time = flightTime
+      flightRecorder.record()
+    }
+  }
+
+  renderState.updateAircraftModel(f16)
+  f16Rig?.setControls(view.actuators)
+  // forward over the ground, for the tyres to roll - not while paused,
+  // when a redraw comes after however long the pause took
+  const groundSpeed = renderState.vt * Math.cos(renderState.alpha) * Math.cos(renderState.beta) * SimulationConstants.FEET_TO_METERS
+  const tyreTime = paused && !replay.playing ? 0 : frameTime * 0.001
+  f16Rig?.update(view.actuators.gear, view.actuators.noseSteer, view.strutTravel, groundSpeed, tyreTime)
+
+  // the wheels in place - judge any touchdown, or strike, the physics found
+  if (!paused && judgeGroundContact()) return
+
+  drawView(view, frameTime)
+}
+
+// The simulation's part of a frame: the controls read, and the physics run
+// up to the frame's time.
+function flyFrame(frameTime) {
   if (gamepad) {
     gamepad.read(airplaneControlInput)
   }
@@ -992,6 +1089,9 @@ function drawScene(currentFrametime) {
   airplaneControlInput.normalizeControls(frameTime * 0.001, isTaxiing())
 
   physicsTimeDebt += frameTime * 0.001
+
+  // the ground below, for the landing gear model - see updateGroundBelow
+  updateGroundBelow()
 
   let steps = 0
   while (physicsTimeDebt >= PHYSICS_STEP && steps < MAX_PHYSICS_STEPS) {
@@ -1018,10 +1118,20 @@ function drawScene(currentFrametime) {
     previousAirplaneState.copyFrom(airplaneState)
 
     integrator.step(f16simulation, controlActuators, airplaneState, PHYSICS_STEP)
+    f16simulation.burnFuel(airplaneState, PHYSICS_STEP)
 
-    // see touchdownSinkRate
-    if (!f16simulation.landingGearModel.weightOnWheels) touchdownSinkRate = null
-    else if (touchdownSinkRate === null) touchdownSinkRate = previousAirplaneState.sinkRate
+    // see touchdown - the tyres reaching the ground
+    const legs = f16simulation.landingGearModel.legsTouching(airplaneState)
+    if (legs.length > 0 && !wheelsTouching) recordTouchdown(legs)
+    wheelsTouching = legs.length > 0
+    // and the airframe hitting it, with the gear out - see HARD_POINTS in
+    // landinggearmodel.js
+    if (controlActuators.gear > 0 && !crashReason) {
+      const part = f16simulation.landingGearModel.strike(airplaneState, controlActuators)
+      if (part) {
+        crashReason = strikeValues(part)
+      }
+    }
     physicsTimeDebt -= PHYSICS_STEP
     steps++
   }
@@ -1030,28 +1140,38 @@ function drawScene(currentFrametime) {
   if (steps === MAX_PHYSICS_STEPS) {
     physicsTimeDebt = 0
   }
+}
 
-  renderState.interpolate(previousAirplaneState, airplaneState, physicsTimeDebt / PHYSICS_STEP)
-  renderState.updateAircraftModel(f16)
-  f16Rig?.setControls(controlActuators)
-
+// The flight as it is now, as the recorder keeps it - see FlightRecorder.
+// Its state is renderState, interpolated for the frame.
+function liveView() {
+  const view = flightRecorder.live
+  view.state.copyFrom(renderState)
+  for (const key in view.actuators) view.actuators[key] = controlActuators[key]
   // controlActuators.gear is the same rate-limited 0..1 actuator position
   // the aerodynamic model's gear drag already rides on (see
   // ActuatorModel's own comment) - passing it straight through here is
   // what gives the visual gear a real transition instead of a snap toggle
   const strutTravel = f16simulation.landingGearModel.strutTravel(renderState)
-  for (const leg in strutTravel) strutTravel[leg] *= SimulationConstants.FEET_TO_METERS
-  f16Rig?.update(controlActuators.gear, controlActuators.noseSteer, strutTravel)
+  for (const leg in view.strutTravel) view.strutTravel[leg] = (strutTravel[leg] ?? 0) * SimulationConstants.FEET_TO_METERS
+  view.throttle = airplaneControlInput.throttle
+  view.gearDown = gearDown
+  view.landingMode = flightControlSystem.landingMode
+  view.weightOnWheels = f16simulation.landingGearModel.weightOnWheels
+  view.fraction = f16simulation.fuelModel.fraction
+  view.ps = f16simulation.atmosphericModel.ps
+  view.rmach = f16simulation.atmosphericModel.rmach
+  view.heightAboveGround = heightAboveGround
+  return view
+}
 
+// Draws a frame of the view given - live or replayed: the HUD, the cameras,
+// and the scene.
+function drawView(view, frameTime) {
   if (hudPlane.visible) {
-    hud.update(
-      renderState,
-      airplaneControlInput,
-      f16simulation.atmosphericModel,
-      compassOffset,
-      f16simulation.landingGearModel.weightOnWheels,
-      gearDown,
-    )
+    // the view stands in for the controls (the throttle), the atmosphere
+    // (static pressure and Mach number) and the fuel model (what is left)
+    hud.update(renderState, view, view, compassOffset, view.weightOnWheels, view.gearDown, view, view.landingMode)
     hud.draw()
     hudTexture.needsUpdate = true
   }
@@ -1068,9 +1188,9 @@ function drawScene(currentFrametime) {
   directionalLight.target.position.copy(f16.position)
   directionalLight.position.copy(f16.position).addScaledVector(sunDirection, SHADOW_LIGHT_DISTANCE)
   ambientLight.position.copy(f16.position).add(UP)
-  updateGroundShadow()
+  updateGroundShadow(view.heightAboveGround)
   // see GROUND_SHADOW_SOFTNESS
-  const softnessTarget = f16simulation.landingGearModel.weightOnWheels ? GROUND_SHADOW_SOFTNESS : 0
+  const softnessTarget = view.weightOnWheels ? GROUND_SHADOW_SOFTNESS : 0
   groundShadowSoftness += (softnessTarget - groundShadowSoftness) * (1 - Math.exp(-(frameTime * 0.001) / GROUND_SHADOW_SOFTEN_TIME))
   groundShadow.setSoftness(groundShadowSoftness < 0.01 ? 0 : groundShadowSoftness / (2 * SHADOW_EXTENT))
 
@@ -1099,7 +1219,12 @@ function drawScene(currentFrametime) {
   // no streaks from the cockpit
   lightStreaks.update(cameras[currentCamera], drawingBufferSize.x, drawingBufferSize.y, currentCamera !== 0)
   terrain.sceneryLights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio())
-  f16Lights.update(terrain.sceneryLights.level, currentCamera !== 0, controlActuators.gear, performance.now() / 1000, renderer.getPixelRatio())
+  // the glide slope indicator, in landing mode
+  f16Rig?.setGlideSlope(
+    view.landingMode ? terrain.runways.glideSlope(cameras[0].position, glideForward.set(0, 1, 0).applyQuaternion(f16.quaternion)) : null,
+  )
+  f16Lights.update(terrain.sceneryLights.level, currentCamera !== 0, view.actuators.gear, performance.now() / 1000, renderer.getPixelRatio())
+  updateLandingLight(f16, cameras[currentCamera], terrain.sceneryLights.level, view.actuators.gear)
   terrain.runways.lights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio(), cameras[0].position, performance.now() / 1000)
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
   f16Rig?.setEngine(renderState.pow, sky.adaptation)
@@ -1296,6 +1421,116 @@ function nextCamera() {
   currentCamera %= cameras.length
   // the HUD only belongs in the cockpit - the airframe shows from every view
   hudPlane.visible = currentCamera === 0
+  if (paused) redrawWhilePaused = true
+}
+
+// see flightRecorder
+function startReplay() {
+  if (!paused || flightRecorder.empty) return
+  // the chase camera's trail, to put back on leaving - see endReplay
+  if (!replay.active) chaseObject.save()
+  replay.active = true
+  replay.time = flightRecorder.oldestTime
+  replay.playing = true
+  replayBanner.style.display = "block"
+  replayControls.style.display = "flex"
+  // the crash screen makes way, and the engine is heard again
+  if (crashed) {
+    crashScreen.style.display = "none"
+    engineSound?.audioContext.resume()
+  }
+  console.log("Replay: %s s", (flightRecorder.newestTime - flightRecorder.oldestTime).toFixed(1))
+}
+
+function endReplay() {
+  if (!replay.active) return
+  replay.active = false
+  // back behind the aircraft where it was paused, rather than easing over
+  // from where the replay left it
+  chaseObject.restore()
+  replayBanner.style.display = "none"
+  replayControls.style.display = "none"
+  if (crashed) {
+    crashScreen.style.display = "flex"
+    engineSound?.audioContext.suspend()
+  }
+  console.log("Replay ended")
+}
+
+// how far back the replay is, and the keys for it
+const replayBanner = document.createElement("div")
+replayBanner.style.cssText =
+  "display: none; position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 14px; " +
+  "border-radius: 6px; background: rgba(0, 0, 0, 0.55); color: #ddd; font: 16px Verdana, sans-serif; " +
+  "pointer-events: none; white-space: nowrap; z-index: 10"
+document.body.append(replayBanner)
+
+// The replay's player - see replaycontrols in index.html: to the
+// beginning, play/pause, to the end, and the timeline, to click or drag
+// along. The buttons let go of their focus once clicked, so the space bar
+// still switches cameras rather than pressing them again.
+const replayControls = document.getElementById("replaycontrols")
+const replayTimeline = document.getElementById("replaytimeline")
+const replayButton = (id, action) =>
+  document.getElementById(id).addEventListener("click", (event) => {
+    event.currentTarget.blur()
+    action()
+  })
+replayButton("replaybeginning", () => (replay.time = flightRecorder.oldestTime))
+replayButton("replayplay", () => {
+  // from the end, it plays again from the beginning
+  if (!replay.playing && replay.time >= flightRecorder.newestTime) replay.time = flightRecorder.oldestTime
+  replay.playing = !replay.playing
+})
+replayButton("replayend", () => {
+  replay.time = flightRecorder.newestTime
+  replay.playing = false
+})
+
+// to the moment under the pointer - held there while dragging, and playing
+// on from there afterwards if it was playing
+function seekReplay(event) {
+  const bounds = replayTimeline.getBoundingClientRect()
+  const along = MathUtils.clamp((event.clientX - bounds.left) / bounds.width, 0, 1)
+  replay.time = flightRecorder.oldestTime + along * (flightRecorder.newestTime - flightRecorder.oldestTime)
+}
+let replayDrag = null
+replayTimeline.addEventListener("pointerdown", (event) => {
+  replayTimeline.setPointerCapture(event.pointerId)
+  replayDrag = { wasPlaying: replay.playing }
+  replay.playing = false
+  seekReplay(event)
+})
+replayTimeline.addEventListener("pointermove", (event) => {
+  if (replayDrag) seekReplay(event)
+})
+const endReplayDrag = () => {
+  if (!replayDrag) return
+  replay.playing = replayDrag.wasPlaying && replay.time < flightRecorder.newestTime
+  replayDrag = null
+}
+replayTimeline.addEventListener("pointerup", endReplayDrag)
+replayTimeline.addEventListener("pointercancel", endReplayDrag)
+
+const replayProgress = document.getElementById("replayprogress")
+const replayHandle = document.getElementById("replayhandle")
+const replayClock = document.getElementById("replayclock")
+const replayPlayIcon = document.getElementById("replayplayicon")
+const replayPauseIcon = document.getElementById("replaypauseicon")
+
+// the banner, and the player's timeline, clock and play/pause button
+function updateReplayControls() {
+  const length = flightRecorder.newestTime - flightRecorder.oldestTime
+  const behind = flightRecorder.newestTime - replay.time
+  const ended = behind <= 0
+  replayBanner.textContent = `REPLAY ${ended ? "ended" : `-${behind.toFixed(1)} s`} · R restart · E exit${crashed ? "" : " · P fly on"}`
+
+  const along = length > 0 ? (replay.time - flightRecorder.oldestTime) / length : 1
+  replayProgress.style.width = `${100 * along}%`
+  replayHandle.style.left = `${100 * along}%`
+  replayClock.textContent = `${(replay.time - flightRecorder.oldestTime).toFixed(1)} / ${length.toFixed(1)} s`
+  replayPlayIcon.style.display = replay.playing ? "none" : "block"
+  replayPauseIcon.style.display = replay.playing ? "block" : "none"
 }
 
 function keyboardHandler(keyboardEvent) {
@@ -1329,9 +1564,20 @@ function keyboardHandler(keyboardEvent) {
     case "h": // hud toggle
       hudPlane.visible = !hudPlane.visible
       break
-    case "p": // pause/resume the entire simulation
+    case "p": // pause/resume the entire simulation - resuming leaves a replay
+      if (crashed) break
       paused = !paused
+      if (!paused) endReplay()
       console.log("Simulation: %s", paused ? "paused" : "running")
+      break
+    case "r": // paused: replay the last 2 minutes, or start the replay again
+      if (paused) startReplay()
+      break
+    case "e": // leave the replay, back to the paused flight
+      if (replay.active) {
+        endReplay()
+        redrawWhilePaused = true
+      }
       break
     case "t": {
       // weather on/off - the steady wind and the turbulence in it, together
@@ -1371,11 +1617,12 @@ function keyboardHandler(keyboardEvent) {
     case ".": // external cam farer
       externalCameraPosition.distance += 10
       break
-    case "1": // speed brake -10 degrees
-      airplaneControlInput.speedbrake -= 10
+    case "1": // speed brakes closed
+      airplaneControlInput.speedbrake = SimulationConstants.SPEEDBRAKE_MIN
       break
-    case "2": // speed brake +10 degrees
-      airplaneControlInput.speedbrake += 10
+    case "2": // speed brakes fully open - as far as the flight control system
+      // lets them with the gear down, see speedbrakeMax there
+      airplaneControlInput.speedbrake = SimulationConstants.SPEEDBRAKE_MAX
       break
     case " ":
       nextCamera()

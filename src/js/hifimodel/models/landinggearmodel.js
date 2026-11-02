@@ -270,6 +270,57 @@ const LEGS = {
    set by the wheelbase: radius = wheelbase / tan(steer angle). */
 const WHEELBASE = VISUAL_NOSE_TIRE.x - VISUAL_MAIN_TIRE.x
 
+/* The parts of the airframe that can hit the ground first, with the gear
+   down: low and far aft, they touch when the nose is raised too far on
+   landing or take off, and out at the wing tips when it banks too far.
+   Found from the model's own geometry (f16/f16.glb), as the points that
+   touch first rotating nose up about the main tyres' contact line or
+   rolling about one main tyre - aircraft frame, meters from the CG: x
+   right, y forward, z up. Pitch attitude at first contact, with the struts
+   fully extended - less with them compressed:
+
+     ventral fins' rear lower corners                     15.8 deg
+     engine nozzle's lower lip, open (idle, full AB)      14.5 deg
+                                closed (military power)   16.6 deg
+     stabilators' trailing edge tips, at no deflection    16.7 deg
+     speedbrake's lower petals' trailing corners, at 43   13.6 deg
+     wing tip missiles' lower fins                        27 deg of bank
+
+   The stabilators' and speedbrake's points move with them: each turns
+   about its hinge (PIVOT, spanwise) by its deflection - the stabilators'
+   trailing edges down for a positive one, the lower speedbrake petals down
+   as it opens. The nozzle's lip moves with its opening - see NOZZLE_EXIT. */
+const HARD_POINTS = [
+  { part: "left ventral fin", at: [-0.62, -3.17, -1.02] },
+  { part: "right ventral fin", at: [0.62, -3.17, -1.02] },
+  { part: "left wing tip missile", at: [-4.04, -2.36, -0.44] },
+  { part: "right wing tip missile", at: [4.04, -2.36, -0.44] },
+  { part: "left stabilator", pivot: [-1.066, -4.276, -0.029], at: [-1.614, -1.284, -0.241], surface: "stabilatorLeft" },
+  { part: "right stabilator", pivot: [1.066, -4.276, -0.029], at: [1.614, -1.284, -0.241], surface: "stabilatorRight" },
+  { part: "left speedbrake", pivot: [0, -4.546, -0.072], at: [-1.07, -0.884, 0.022], surface: "speedbrake" },
+  { part: "right speedbrake", pivot: [0, -4.546, -0.072], at: [1.07, -0.884, 0.022], surface: "speedbrake" },
+]
+
+/* The engine nozzle's exit, aircraft frame, meters: how far aft (y), the
+   height of its centreline (axisZ), and its radius fully open. It opens and
+   closes with engine power, as the F100's does - fully open at idle,
+   closing to its smallest at full military power (power 50), and opening
+   again through the afterburner to fully open at its maximum (100) - its
+   radius at the exit then CLOSING less. Where it ends, and how far it
+   closes, are from a side view drawing of the F-16 (the model's own nozzle
+   is a straight tube reaching 0.25 m further aft, which f16Model.js reshapes
+   to match). Its lower lip is one of HARD_POINTS. */
+export const NOZZLE_EXIT = { y: -5.45, axisZ: 0.06, radius: 0.575, closing: 0.35 }
+
+// how far open the nozzle is, 0 (closed) to 1, at an engine power level
+export function nozzleOpening(power) {
+  const smoothstep = (x, a, b) => {
+    const t = Math.min(Math.max((x - a) / (b - a), 0), 1)
+    return t * t * (3 - 2 * t)
+  }
+  return power <= 50 ? 1 - smoothstep(power, 0, 50) : smoothstep(power, 50, 100)
+}
+
 export function noseSteerAuthority(groundSpeed) {
   const maxLateralAccel = SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL * SimulationConstants.G
   const speedLimited = Math.atan((maxLateralAccel * WHEELBASE) / Math.max(groundSpeed * groundSpeed, 1e-6))
@@ -299,6 +350,62 @@ export default class LandingGearModel {
    * @param x  aircraft state - only altitude and attitude are used
    * @returns {nose, mainL, mainR}  strut travel, ft
    */
+  /**
+   * The legs whose tyres are on the ground, at a state - see update().
+   *
+   * @param x  the aircraft's state
+   * @returns  the legs' names: "nose", "mainL", "mainR"
+   */
+  legsTouching(x) {
+    const { q0, q1, q2, q3 } = x
+    const r20 = 2 * (q1 * q3 - q0 * q2)
+    const r21 = 2 * (q2 * q3 + q0 * q1)
+    const r22 = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+    return Object.entries(LEGS)
+      .filter(([, leg]) => this.groundAlt - (x.alt - (r20 * leg.x + r21 * leg.y + r22 * leg.z)) > 0)
+      .map(([name]) => name)
+  }
+
+  /**
+   * The first part of the airframe, if any, that is in the ground at a
+   * state - see HARD_POINTS.
+   *
+   * @param x  the aircraft's state
+   * @param u  the actuators' positions - for the stabilators and speedbrake
+   * @returns  the part's name, or null
+   */
+  strike(x, u) {
+    const { q0, q1, q2, q3 } = x
+    const r20 = 2 * (q1 * q3 - q0 * q2)
+    const r21 = 2 * (q2 * q3 + q0 * q1)
+    const r22 = q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3
+    const deflection = {
+      stabilatorLeft: u.elevator - u.stabilatorDiff,
+      stabilatorRight: u.elevator + u.stabilatorDiff,
+      speedbrake: u.speedbrake,
+    }
+    for (const point of HARD_POINTS) {
+      let [right, forward, up] = point.at
+      if (point.pivot) {
+        const d = deflection[point.surface] * SimulationConstants.DTOR
+        ;[forward, up] = [forward * Math.cos(d) - up * Math.sin(d), up * Math.cos(d) + forward * Math.sin(d)]
+        right += point.pivot[0]
+        forward += point.pivot[1]
+        up += point.pivot[2]
+      }
+      // body frame, ft: x forward, y right, z down
+      const bx = forward * M_TO_FT
+      const by = right * M_TO_FT
+      const bz = -up * M_TO_FT
+      if (this.groundAlt > x.alt - (r20 * bx + r21 * by + r22 * bz)) return point.part
+    }
+    // the nozzle's lower lip, as far open as it is - see NOZZLE_EXIT
+    const e = NOZZLE_EXIT
+    const lip = e.axisZ - e.radius * (1 - (1 - nozzleOpening(x.pow)) * e.closing)
+    if (this.groundAlt > x.alt - (r20 * e.y + r22 * -lip) * M_TO_FT) return "engine nozzle"
+    return null
+  }
+
   strutTravel(x) {
     const { q0, q1, q2, q3 } = x
 

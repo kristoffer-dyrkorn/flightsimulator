@@ -4,6 +4,7 @@ import CompressibilityModel from "./models/compressibilitymodel.js"
 import TurbulenceModel from "./models/turbulencemodel.js"
 import WindModel from "./models/windmodel.js"
 import LandingGearModel from "./models/landinggearmodel.js"
+import FuelModel, { FUEL_CAPACITY } from "./models/fuelmodel.js"
 import { mixFlaperons } from "./flaperons.js"
 import { groundEffectLiftFactor } from "./models/groundeffect.js"
 import StateVector from "./statevector.js"
@@ -32,6 +33,13 @@ export default class F16Simulation {
     this.turbulenceModel = new TurbulenceModel()
     this.windModel = new WindModel(windField)
     this.landingGearModel = new LandingGearModel()
+    // see fuelmodel.js - 80% of a full internal load to start with
+    this.fuelModel = new FuelModel(0.8 * FUEL_CAPACITY)
+  }
+
+  // burns the fuel for a step just taken - see fuelmodel.js
+  burnFuel(x, dt) {
+    this.fuelModel.update(this.engineModel, x.pow, x.alt, this.atmosphericModel.rmach, dt)
   }
 
   limit(value, min, max) {
@@ -45,19 +53,20 @@ export default class F16Simulation {
 
   getStateDerivative(u, x, xd = new StateVector()) {
     const g = SimulationConstants.G /* gravity, ft/s^2 */
-    const m = SimulationConstants.MASS /* mass, slugs */
+    const fuel = this.fuelModel
+    const m = fuel.mass /* mass, slugs - with the fuel aboard */
     const B = SimulationConstants.B /* span, ft */
     const S = SimulationConstants.S /* planform area, ft^2 */
     const cbar = SimulationConstants.CBAR /* mean aero chord, ft */
     const xcgr = SimulationConstants.XCGR /* reference center of gravity as a fraction of cbar */
-    const xcg = SimulationConstants.XCG /* center of gravity as a fraction of cbar. */
+    const xcg = fuel.xcg /* center of gravity as a fraction of cbar - moves with the fuel */
 
     const Heng = SimulationConstants.HENG /* turbine momentum along roll axis. */
 
-    const Jy = SimulationConstants.IYY /* slug-ft^2 */
-    const Jxz = SimulationConstants.IXZ /* slug-ft^2 */
-    const Jz = SimulationConstants.IZZ /* slug-ft^2 */
-    const Jx = SimulationConstants.IXX /* slug-ft^2 */
+    const Jy = fuel.iyy /* slug-ft^2 */
+    const Jxz = fuel.ixz /* slug-ft^2 */
+    const Jz = fuel.izz /* slug-ft^2 */
+    const Jx = fuel.ixx /* slug-ft^2 */
 
     const npos = x.npos /* north position */
     const epos = x.epos /* east position */
@@ -162,9 +171,11 @@ export default class F16Simulation {
     )
 
     this.atmosphericModel.update(vta, alt)
-    this.engineModel.update(x.pow, alt, this.atmosphericModel.rmach, u.throttle)
+    // with the tanks dry the engine winds down, and gives no thrust - only
+    // the drag of it windmilling
+    this.engineModel.update(x.pow, alt, this.atmosphericModel.rmach, fuel.empty ? 0 : u.throttle)
 
-    const T = this.engineModel.thrust
+    const T = fuel.empty ? Math.min(this.engineModel.thrust, 0) : this.engineModel.thrust
     const el = u.elevator
 
     /* the flaperons are both ailerons and flaps, sharing the same travel -

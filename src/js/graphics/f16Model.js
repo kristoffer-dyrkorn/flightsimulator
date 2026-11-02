@@ -1,6 +1,8 @@
 import {
   AdditiveBlending,
   AnimationMixer,
+  Bone,
+  Skeleton,
   Ray,
   BufferAttribute,
   Box3,
@@ -14,12 +16,15 @@ import {
   MeshStandardMaterial,
   Object3D,
   Quaternion,
+  Shape,
+  ShapeGeometry,
   ShaderMaterial,
   Vector3,
   MathUtils,
 } from "three"
 import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import { mixFlaperons } from "../hifimodel/flaperons.js"
+import { NOZZLE_EXIT, nozzleOpening } from "../hifimodel/models/landinggearmodel.js"
 
 /*
  * The F-16 model in f16/f16.glb (converted from f16-2 - see its own
@@ -120,17 +125,18 @@ const NOZZLE = { axisZ: 0.06, radius: 0.58, innerRadius: 0.52, wallRadius: 0.545
 // the other.
 const NOZZLE_METAL = 0x1c1814
 
-// The nozzle's exit opens and closes with engine power, as the F100's does:
-// fully open at idle, closing to its smallest at full military power (power
-// 50), and opening again through the afterburner to fully open at its
-// maximum (100). The model has it fully open, a straight tube 1.13 m across;
-// its flaps, from NOZZLE_HINGE_Y aft to NOZZLE_EXIT_Y, are drawn swung in
-// towards the centreline, closed, by up to NOZZLE_CLOSING of the radius at
-// the exit - an estimate, there being no published nozzle dimensions to go
-// by. See nozzleMotion.
+// The nozzle's exit opens and closes with engine power, as the F100's does -
+// see NOZZLE_EXIT in landinggearmodel.js, which has its lower lip as a place
+// the tail can hit the ground. The model has it fully open, a straight tube
+// 1.13 m across, its flaps reaching from NOZZLE_HINGE_Y aft to
+// NOZZLE_MODEL_EXIT_Y - 0.25 m further than a side view drawing of the
+// F-16 has them. So they are drawn shortened, ending at NOZZLE_EXIT's y
+// instead, and swung in towards the centreline, closed, by up to its
+// closing of the radius at the exit - which the drawing, at normal power,
+// shows. See nozzleMotion.
 const NOZZLE_HINGE_Y = -4.9
-const NOZZLE_EXIT_Y = -5.7
-const NOZZLE_CLOSING = 0.25
+const NOZZLE_MODEL_EXIT_Y = -5.7
+const NOZZLE_SHORTENING = (NOZZLE_HINGE_Y - NOZZLE_EXIT.y) / (NOZZLE_HINGE_Y - NOZZLE_MODEL_EXIT_Y)
 
 // the round glow's radius on the turbine face - just inside the hexagon the
 // model has there, 0.50 m to its corners - and the width of its soft edge,
@@ -152,7 +158,7 @@ const GLOW_MAX = 0.9
 // centreline: an outer plume and a hotter inner core, each a cone drawn
 // additively - see afterburnerFlame. Lengths and radii in meters, at full
 // afterburner; both grow out of the nozzle as the afterburner lights.
-const FLAME_EXIT_Y = -5.68
+const FLAME_EXIT_Y = NOZZLE_EXIT.y + 0.02
 const FLAMES = [
   { length: 3.6, radius: 0.46, endRadius: 0.12, hot: new Color(1.0, 0.5, 0.15), cool: new Color(0.75, 0.15, 0.02), strength: 0.45, diamonds: 4 },
   { length: 1.7, radius: 0.34, endRadius: 0.05, hot: new Color(0.7, 0.7, 1.0), cool: new Color(1.0, 0.5, 0.15), strength: 0.6, diamonds: 3 },
@@ -169,6 +175,22 @@ const GLASS_OPACITY = 0.12
 // carry each wheel, moved up with the strut's compression
 const STEERING_BONE = "G"
 const WHEEL_BONES = { nose: "G", mainL: "Wheel_L", mainR: "Wheel_R" }
+
+// The tyres, which roll with the ground speed - each its own mesh, but
+// skinned to a bone that carries more than the tyre: the nose wheel's to the
+// steering bone with the fork, the main wheels' with their hubs. So each is
+// given a bone of its own at its axle, under that one, to turn about (see
+// addSpinBone). Their radii, m, measured off the model.
+const TYRES = {
+  nose: { mesh: "Wheel", radius: 0.217 },
+  mainL: { mesh: "Wheel_R001", radius: 0.324 },
+  mainR: { mesh: "Wheel_R002", radius: 0.324 },
+}
+// how fast a tyre spinning in the air slows down - its bearings' friction -
+// and how fast the brakes stop the main wheels as the gear retracts, as
+// the real jet's do (and the nose wheel's snubber)
+const TYRE_SPIN_DOWN = 4 // s
+const TYRE_RETRACT_STOP = 0.3 // s
 
 // parts hidden in the cockpit view: the seat (the eye is just in front of
 // its headrest) and the HUD's own frame and glass (the simulator draws its
@@ -245,11 +267,16 @@ const TUB_PANEL_FROM = 0.2
 // centreline, which goes ANCHOR_DISTANCE ahead of the eye and OVER_NOSE
 // degrees down - on the line over the nose, which the simulator's own HUD
 // glass sits right on top of (see placeHudAboveAirframe in index.js). Its
-// HUD - the glass, its frame and the top of its housing, with the AOA
-// indexer and the refuelling status lights either side of it: all
-// triangles reaching up into HUD (model frame) - is cut out: the simulator
-// draws its own HUD there - and so are the remains of it all: the parts of
-// the mesh, each in one piece, that lie wholly inside one of REMAINS.
+// HUD - the glass, its frame and the top of its housing: all triangles
+// reaching up into HUD (model frame) - is cut out: the simulator draws its
+// own HUD there - and so are the remains of it all: the parts of the mesh,
+// each in one piece, that lie wholly inside one of REMAINS. The AOA indexer
+// on the HUD's left and the refuelling status lights on its right - the
+// parts wholly inside one of KEPT - are kept, the indexer as the glide slope
+// indicator (see GLIDE_LAMPS), and each moved out to its side by its SHIFT,
+// clear of the text the simulator's HUD shows at its lower corners, and
+// turned about the upright through its middle to face the pilot's eye, so
+// little of its side shows.
 // What is left is then raised or lowered until its top, straight ahead -
 // NOSE_HALF_WIDTH degrees either side, where the nose is - is just on the
 // line over the nose, OVER_NOSE degrees down - PANEL_OVER_NOSE above it - so
@@ -268,7 +295,36 @@ const COCKPIT_MODEL = {
     new Box3(new Vector3(1.02, 1.12, 0.81), new Vector3(1.15, Infinity, 0.826)),
     new Box3(new Vector3(1.02, 1.12, 0.888), new Vector3(1.15, Infinity, 0.905)),
   ],
+  // the AOA indexer, then the refuelling status lights - mirror images,
+  // about z 0.8575 - and how far each is moved (model z, to the right)
+  kept: [
+    { box: new Box3(new Vector3(1.08, 1.13, 0.788), new Vector3(1.18, 1.195, 0.811)), shift: -0.02 },
+    { box: new Box3(new Vector3(1.08, 1.13, 0.904), new Vector3(1.18, 1.195, 0.927)), shift: 0.02 },
+  ],
 }
+
+// The glide slope indicator, on the AOA indexer's face (model frame: x is
+// how far ahead, and the face looks back at the pilot) - its three lamps,
+// top to bottom, as the AOA indexer's: a chevron pointing down, lit above
+// the slope (fly down), a ring, lit on it, and a chevron pointing up, lit
+// below it (fly up). Within GLIDE_ON either side only the ring is lit, out
+// to GLIDE_FULL the ring and the chevron on that side, and beyond that the
+// chevron alone. All dark while the indicator is off - see setGlideSlope.
+// The face is a window, recessed behind the housing's rim: y 1.164 to
+// 1.183, z 0.7988 to 0.8055, at x 1.096 - before the housing is moved (see
+// COCKPIT_MODEL), which the lamps are moved with.
+const GLIDE_FACE = 1.0955 // x, just in front of the indexer's face
+const GLIDE_CENTRE_Z = 0.8021
+const GLIDE_LAMP_SIZE = 0.0027 // half the width of a symbol
+const GLIDE_LAMPS = [
+  { shape: "down", y: 1.1797, colour: new Color(1.0, 0.55, 0.05) },
+  { shape: "ring", y: 1.1735, colour: new Color(0.15, 1.0, 0.25) },
+  { shape: "up", y: 1.1673, colour: new Color(1.0, 0.08, 0.04) },
+]
+const GLIDE_ON = 0.2 // degrees
+const GLIDE_FULL = 0.7 // degrees
+// how bright an unlit lamp's glass still looks
+const GLIDE_UNLIT = 0.03
 // the nose seen from the eye, half its width
 const NOSE_HALF_WIDTH = 9 // degrees
 // how far above the line over the nose the panel's top is, so none of the
@@ -304,6 +360,47 @@ function find(root, name, predicate = () => true) {
  * @param decoder     the meshopt decoder
  * @param onLoad      called with the rig (see F16Rig)
  */
+// Gives a skinned mesh, all of it on one bone, a bone of its own at the
+// middle of its bounds - a tyre's axle - under that one, so it follows it,
+// and can be turned on its own about the axle. The axle is the aircraft's
+// x axis (frame: the object in the aircraft's frame), in the new bone's
+// own frame. The model's pose is the one the mesh is bound in.
+function addSpinBone(mesh, frame) {
+  const weights = mesh.geometry.attributes.skinWeight
+  const indices = mesh.geometry.attributes.skinIndex
+  const parent = mesh.skeleton.bones[indices.getX(0)]
+
+  // the middle, in the world, as skinned
+  const bounds = new Box3()
+  const point = new Vector3()
+  for (let i = 0; i < indices.count; i++) {
+    point.fromBufferAttribute(mesh.geometry.attributes.position, i)
+    mesh.applyBoneTransform(i, point)
+    bounds.expandByPoint(point.applyMatrix4(mesh.matrixWorld))
+  }
+  const bone = new Bone()
+  bone.name = `${mesh.name}_spin`
+  bone.position.copy(parent.worldToLocal(bounds.getCenter(point)))
+  parent.add(bone)
+  bone.updateMatrixWorld(true)
+
+  // the same vertices as before at no turn: the new bone's inverse is the
+  // old one's, less the offset of the new bone from the old
+  const index = indices.getX(0)
+  const inverse = new Matrix4().copy(bone.matrix).invert().multiply(mesh.skeleton.boneInverses[index])
+  for (let i = 0; i < indices.count; i++) {
+    indices.setXYZW(i, 0, 0, 0, 0)
+    weights.setXYZW(i, 1, 0, 0, 0)
+  }
+  indices.needsUpdate = true
+  weights.needsUpdate = true
+  mesh.bind(new Skeleton([bone], [inverse]), mesh.bindMatrix)
+
+  const axle = new Vector3(1, 0, 0).transformDirection(frame.matrixWorld)
+  axle.transformDirection(new Matrix4().copy(bone.matrixWorld).invert())
+  return { bone, axle }
+}
+
 export function loadF16Model(f16, ktx2Loader, decoder, onLoad) {
   new GLTFLoader()
     .setKTX2Loader(ktx2Loader)
@@ -451,9 +548,10 @@ function depthOnly(material) {
   return DEPTH_ONLY.get(material.side)
 }
 
-// Drops the pieces of a mesh - its parts connected by shared corners - that
-// lie wholly inside box, in the frame of the model's root (as cutOut)
-function cutPieces(mesh, box) {
+// The pieces of a mesh - its parts connected by shared corners: which one
+// each triangle is in, and a test of which lie wholly inside a box, in the
+// frame of the model's root (as cutOut)
+function piecesOf(mesh) {
   const g = mesh.geometry
   const position = g.attributes.position
   const index = g.index.array
@@ -477,16 +575,59 @@ function cutPieces(mesh, box) {
     parent[root(corner[index[t + 1]])] = a
     parent[root(corner[index[t + 2]])] = a
   }
+  const pieceOf = Int32Array.from({ length: index.length / 3 }, (_, t) => root(corner[index[3 * t]]))
   // a piece is inside if all its corners are
-  const outside = new Set()
-  for (let i = 0; i < position.count; i++) {
-    if (!box.containsPoint(v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))) outside.add(root(corner[i]))
+  const inside = (box) => {
+    const outside = new Set()
+    for (let i = 0; i < position.count; i++) {
+      if (!box.containsPoint(v.fromBufferAttribute(position, i).applyMatrix4(mesh.matrixWorld))) outside.add(root(corner[i]))
+    }
+    return (piece) => !outside.has(piece)
   }
+  return { pieceOf, inside }
+}
+
+// Drops the pieces of a mesh that lie wholly inside box - but not those
+// wholly inside one of spares
+function cutPieces(mesh, box, spares = []) {
+  const { pieceOf, inside } = piecesOf(mesh)
+  const drop = inside(box)
+  const spared = spares.map(inside)
+  const keep = (piece) => spared.some((isSpared) => isSpared(piece))
+  const index = mesh.geometry.index.array
   const kept = []
-  for (let t = 0; t < index.length; t += 3) {
-    if (outside.has(root(corner[index[t]]))) kept.push(index[t], index[t + 1], index[t + 2])
+  pieceOf.forEach((piece, t) => {
+    if (!drop(piece) || keep(piece)) kept.push(index[3 * t], index[3 * t + 1], index[3 * t + 2])
+  })
+  mesh.geometry.setIndex(kept)
+}
+
+// a glide slope lamp's symbol, facing back - see GLIDE_LAMPS
+function glideLampGeometry(kind) {
+  const s = GLIDE_LAMP_SIZE
+  const shape = new Shape()
+  if (kind === "ring") {
+    shape.absarc(0, 0, 0.8 * s, 0, 2 * Math.PI, false)
+    const hole = new Shape()
+    hole.absarc(0, 0, 0.45 * s, 0, 2 * Math.PI, true)
+    shape.holes.push(hole)
+  } else {
+    // a chevron pointing down, flipped for up
+    const f = kind === "down" ? 1 : -1
+    const h = 0.55 * s
+    const t = 0.38 * s
+    shape.moveTo(-s, f * h)
+    shape.lineTo(-s + t, f * h)
+    shape.lineTo(0, f * (-h + 1.4 * t))
+    shape.lineTo(s - t, f * h)
+    shape.lineTo(s, f * h)
+    shape.lineTo(0, -f * h)
+    shape.closePath()
   }
-  g.setIndex(kept)
+  // the shape's x to the right (model z), its y up (model y), on the face
+  const geometry = new ShapeGeometry(shape)
+  geometry.applyMatrix4(new Matrix4().set(0, 0, 0, GLIDE_FACE, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1))
+  return geometry
 }
 
 // Moves the triangles of a mesh whose centre, in the aircraft frame, take
@@ -524,8 +665,9 @@ function splitOff(mesh, toAircraft, take) {
 
 // Drops a mesh's triangles that cut says to, given their centre and their
 // highest corner (most y) in the frame of the model's root (its
-// matrixWorld, before the model is placed anywhere)
-function cutOut(mesh, cut) {
+// matrixWorld, before the model is placed anywhere) - but not those spare
+// says to keep, by triangle
+function cutOut(mesh, cut, spare = null) {
   const g = mesh.geometry
   const position = g.attributes.position
   const index = g.index ? g.index.array : Array.from({ length: position.count }, (_, i) => i)
@@ -541,7 +683,7 @@ function cutOut(mesh, cut) {
       centre.add(corner)
       if (corner.y > top.y) top.copy(corner)
     }
-    if (!cut(centre.divideScalar(3), top)) kept.push(index[t], index[t + 1], index[t + 2])
+    if (spare?.[t / 3] || !cut(centre.divideScalar(3), top)) kept.push(index[t], index[t + 1], index[t + 2])
   }
   g.setIndex(kept)
 }
@@ -635,9 +777,10 @@ function insideWall(material, frame) {
 }
 
 /*
- * Has a material draw the nozzle's flaps swung in towards its centreline,
- * by NOZZLE_CLOSING at the exit with the nozzle closed (open.value 0) and
- * not at all fully open (1). frame takes the mesh's own coordinates, after
+ * Has a material draw the nozzle's flaps shortened (see
+ * NOZZLE_SHORTENING) and swung in towards its centreline, by NOZZLE_EXIT's
+ * closing at the exit with the nozzle closed (open.value 0) and not at all
+ * fully open (1). frame takes the mesh's own coordinates, after
  * skinning, to the aircraft frame. Keeps whatever the material already
  * changes in its shaders (see roundGlow).
  */
@@ -655,10 +798,11 @@ function nozzleMotion(material, frame, open) {
         "#include <project_vertex>",
         `{
           vec3 p = (nozzleFrame * vec4(transformed, 1.0)).xyz;
-          float along = clamp((${NOZZLE_HINGE_Y.toFixed(3)} - p.y) / ${(NOZZLE_HINGE_Y - NOZZLE_EXIT_Y).toFixed(3)}, 0.0, 1.0);
-          float scale = 1.0 - (1.0 - nozzleOpen) * ${NOZZLE_CLOSING.toFixed(3)} * along;
+          float along = clamp((${NOZZLE_HINGE_Y.toFixed(3)} - p.y) / ${(NOZZLE_HINGE_Y - NOZZLE_MODEL_EXIT_Y).toFixed(3)}, 0.0, 1.0);
+          float scale = 1.0 - (1.0 - nozzleOpen) * ${NOZZLE_EXIT.closing.toFixed(3)} * along;
           p.x *= scale;
           p.z = ${NOZZLE.axisZ.toFixed(3)} + (p.z - ${NOZZLE.axisZ.toFixed(3)}) * scale;
+          if (p.y < ${NOZZLE_HINGE_Y.toFixed(3)}) p.y = ${NOZZLE_HINGE_Y.toFixed(3)} + (p.y - ${NOZZLE_HINGE_Y.toFixed(3)}) * ${NOZZLE_SHORTENING.toFixed(4)};
           transformed = (nozzleInverse * vec4(p, 1.0)).xyz;
           vNozzleY = p.y;
         }
@@ -847,6 +991,18 @@ class F16Rig {
     ])
     this.animatedPose = [...adjusted].map((b) => ({ bone: b, quaternion: b.quaternion.clone(), position: b.position.clone() }))
 
+    // see TYRES - set up with the gear down, where the clip starts
+    model.updateMatrixWorld(true)
+    this.tyres = {}
+    for (const [leg, tyre] of Object.entries(TYRES)) {
+      const mesh = find(model, tyre.mesh, (o) => o.isSkinnedMesh)
+      if (!mesh) {
+        console.log("F-16 model: no %s tyre", leg)
+        continue
+      }
+      this.tyres[leg] = { ...addSpinBone(mesh, this.object), radius: tyre.radius, angle: 0, rate: 0 }
+    }
+
     // the wheel centres for the ground checks, fixed on the aircraft
     this.wheels = {}
     for (const [wheel, position] of Object.entries(WHEEL_CENTRES)) {
@@ -901,6 +1057,9 @@ class F16Rig {
     })
 
     this.cockpitOnlyParts = []
+    // see setGlideSlope - the lamps come with the cockpit model
+    this.glideLamps = null
+    this.glideSlope = null
     this.loadCockpitModel(f16)
 
     // the parts reaching within COCKPIT_NEAR_REACH of the eye, and the rest
@@ -1033,7 +1192,7 @@ class F16Rig {
   // see COCKPIT_MODEL - loaded on its own, added to the cockpit parts
   // once it is in
   loadCockpitModel(f16) {
-    const { url, scale, anchor, hud, remains } = COCKPIT_MODEL
+    const { url, scale, anchor, hud, remains, kept } = COCKPIT_MODEL
     new GLTFLoader().load(
       url,
       (gltf) => {
@@ -1050,11 +1209,54 @@ class F16Rig {
           .multiply(new Matrix4().makeScale(scale, scale, scale))
           .multiply(new Matrix4().makeTranslation(anchor.clone().negate()))
 
+        // where each kept part goes, in the frame of the model's root: out
+        // to its side, then turned about the upright (y) through its middle
+        // until its face, looking back (-x), looks at the eye
+        const eye = EYE_POSITION.clone().applyMatrix4(panel.matrix.clone().invert())
+        const placings = kept.map(({ box, shift }) => {
+          const middle = box.getCenter(new Vector3())
+          middle.z += shift
+          const turn = Math.atan2(eye.z - middle.z, middle.x - eye.x)
+          return new Matrix4()
+            .makeTranslation(middle)
+            .multiply(new Matrix4().makeRotationY(turn))
+            .multiply(new Matrix4().makeTranslation(middle.clone().negate()))
+            .multiply(new Matrix4().makeTranslation(0, 0, shift))
+        })
+
         const meshes = []
         model.traverse((mesh) => mesh.isMesh && meshes.push(mesh))
         for (const mesh of meshes) {
-          cutOut(mesh, (centre, top) => centre.x < hud.max.x && top.y > hud.min.y && centre.z > hud.min.z && centre.z < hud.max.z)
-          for (const box of remains) cutPieces(mesh, box)
+          const { pieceOf, inside } = piecesOf(mesh)
+          const index = Array.from(mesh.geometry.index.array)
+          const keeps = kept.map(({ box }) => inside(box))
+          cutOut(
+            mesh,
+            (centre, top) => centre.x < hud.max.x && top.y > hud.min.y && centre.z > hud.min.z && centre.z < hud.max.z,
+            Array.from(pieceOf, (piece) => keeps.some((keep) => keep(piece))),
+          )
+          for (const box of remains) cutPieces(mesh, box, kept.map(({ box }) => box))
+
+          // each kept part's corners, moved and turned (see placeKept) - in
+          // the mesh's own frame
+          const position = mesh.geometry.attributes.position
+          const normal = mesh.geometry.attributes.normal
+          kept.forEach((_, k) => {
+            const corners = new Set()
+            pieceOf.forEach((piece, t) => keeps[k](piece) && corners.add(index[3 * t]).add(index[3 * t + 1]).add(index[3 * t + 2]))
+            const move = new Matrix4().copy(mesh.matrixWorld).invert().multiply(placings[k]).multiply(mesh.matrixWorld)
+            const turn = new Matrix3().getNormalMatrix(move)
+            const v = new Vector3()
+            for (const i of corners) {
+              v.fromBufferAttribute(position, i).applyMatrix4(move)
+              position.setXYZ(i, v.x, v.y, v.z)
+              if (!normal) continue
+              v.fromBufferAttribute(normal, i).applyMatrix3(turn).normalize()
+              normal.setXYZ(i, v.x, v.y, v.z)
+            }
+          })
+          position.needsUpdate = true
+          if (normal) normal.needsUpdate = true
         }
 
         // its top just on the line over the nose - see COCKPIT_MODEL
@@ -1082,11 +1284,24 @@ class F16Rig {
           own.dispose()
         }
 
+        // see GLIDE_LAMPS
+        this.glideLamps = GLIDE_LAMPS.map(({ shape, y, colour }) => {
+          const lamp = new Mesh(glideLampGeometry(shape), new MeshBasicMaterial({ color: colour.clone(), toneMapped: false, side: DoubleSide }))
+          lamp.name = "GlideSlopeLamp"
+          lamp.position.set(0, y, GLIDE_CENTRE_Z)
+          lamp.applyMatrix4(placings[0])
+          lamp.castShadow = lamp.receiveShadow = false
+          lamp.userData.colour = colour
+          model.add(lamp)
+          return lamp
+        })
+        this.setGlideSlope(this.glideSlope)
+
         panel.add(model)
         panel.visible = false
         f16.add(panel)
         this.cockpitOnlyParts.push(panel)
-        this.nearParts.push(...meshes)
+        this.nearParts.push(...meshes, ...this.glideLamps)
       },
       () => {},
       (error) => console.log("Could not load the cockpit model: " + error),
@@ -1222,6 +1437,25 @@ class F16Rig {
    *                    adaptation (see SkyDome.adaptation) - the glow is a
    *                    fixed brightness, which shows brighter the darker it is
    */
+  /**
+   * The glide slope indicator - see GLIDE_LAMPS.
+   *
+   * @param deviation  degrees above (+) or below (-) the approach slope, or
+   *                   null to turn it off
+   */
+  setGlideSlope(deviation) {
+    this.glideSlope = deviation
+    if (!this.glideLamps) return
+    const [down, ring, up] = this.glideLamps
+    const d = deviation ?? 0
+    const lit = [
+      deviation !== null && d > GLIDE_ON,
+      deviation !== null && Math.abs(d) <= GLIDE_FULL,
+      deviation !== null && d < -GLIDE_ON,
+    ]
+    ;[down, ring, up].forEach((lamp, i) => lamp.material.color.copy(lamp.userData.colour).multiplyScalar(lit[i] ? 1 : GLIDE_UNLIT))
+  }
+
   setEngine(power, adaptation = 1) {
     if (!this.nozzleGlows) return
     const heat = MathUtils.smoothstep(power, GLOW_FROM_POWER, 50)
@@ -1232,7 +1466,7 @@ class F16Rig {
     })
     // the nozzle's opening: fully open at idle and full afterburner, closed
     // at full military power
-    this.nozzleOpen.value = power <= 50 ? 1 - MathUtils.smoothstep(power, 0, 50) : MathUtils.smoothstep(power, 50, 100)
+    this.nozzleOpen.value = nozzleOpening(power)
     this.nozzleWall.emissive.copy(this.nozzleGlows[1].emissive)
     this.bodyWall?.emissive.copy(this.nozzleGlows[1].emissive)
 
@@ -1269,8 +1503,10 @@ class F16Rig {
    * @param gearPosition  0 (up) .. 1 (down), the gear actuator's position
    * @param noseSteer     nosewheel steering angle, degrees, positive right
    * @param strutTravel   {nose, mainL, mainR}, meters each strut is compressed
+   * @param groundSpeed   m/s, forward over the ground - for the tyres to roll
+   * @param dt            s since the last update - for the tyres to roll
    */
-  update(gearPosition, noseSteer = 0, strutTravel = null) {
+  update(gearPosition, noseSteer = 0, strutTravel = null, groundSpeed = 0, dt = 0) {
     for (const part of this.gearParts) part.visible = gearPosition > 0
     for (const p of this.animatedPose) {
       p.bone.quaternion.copy(p.quaternion)
@@ -1308,6 +1544,17 @@ class F16Rig {
 
     // nosewheel steering, about the fork's own vertical (its local y)
     this.steering.quaternion.multiply(this.rotation.setFromAxisAngle(new Vector3(0, 1, 0), noseSteer * MathUtils.DEG2RAD))
+
+    // the tyres rolling on the ground at its speed, spinning down in the
+    // air, and stopped as the gear retracts - see TYRES. Turning about the
+    // axle the way the aircraft's x axis points, forward motion is a
+    // negative turn.
+    for (const [leg, tyre] of Object.entries(this.tyres)) {
+      if ((strutTravel?.[leg] ?? 0) > 0) tyre.rate = groundSpeed / tyre.radius
+      else tyre.rate *= Math.exp(-dt / (gearPosition < 1 ? TYRE_RETRACT_STOP : TYRE_SPIN_DOWN))
+      tyre.angle = (tyre.angle + tyre.rate * dt) % (2 * Math.PI)
+      tyre.bone.quaternion.setFromAxisAngle(tyre.axle, -tyre.angle)
+    }
 
     // each wheel raised by its strut's compression, and the nose wheel onto
     // the landing gear model's contact point with the gear down

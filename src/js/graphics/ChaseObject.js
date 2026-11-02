@@ -48,6 +48,41 @@ export default class ChaseObject {
     this.quaternion.copy(target.quaternion)
   }
 
+  // the trail as it is, to go back to with restore - see the replay in
+  // index.js, which moves the target far away and back
+  save() {
+    const copy = (from, to) => {
+      to.position.copy(from.position)
+      to.quaternion.copy(from.quaternion)
+    }
+    this.saved ??= {
+      samples: this.samples.map(() => ({ position: new Vector3(), quaternion: new Quaternion() })),
+      previous: { position: new Vector3(), quaternion: new Quaternion() },
+      output: { position: new Vector3(), quaternion: new Quaternion() },
+    }
+    this.samples.forEach((sample, i) => copy(sample, this.saved.samples[i]))
+    copy({ position: this.previousPosition, quaternion: this.previousQuaternion }, this.saved.previous)
+    copy(this, this.saved.output)
+    this.saved.head = this.head
+    this.saved.phase = this.phase
+    this.saved.initialized = this.initialized
+  }
+
+  restore() {
+    if (!this.saved) return
+    const copy = (from, to) => {
+      to.position.copy(from.position)
+      to.quaternion.copy(from.quaternion)
+    }
+    this.saved.samples.forEach((sample, i) => copy(sample, this.samples[i]))
+    this.previousPosition.copy(this.saved.previous.position)
+    this.previousQuaternion.copy(this.saved.previous.quaternion)
+    copy(this.saved.output, this)
+    this.head = this.saved.head
+    this.phase = this.saved.phase
+    this.initialized = this.saved.initialized
+  }
+
   update(target, frameTime) {
     if (!this.initialized || !(frameTime >= 0) || frameTime >= TRAIL_DELAY + SAMPLE_INTERVAL) {
       this.initialized = true

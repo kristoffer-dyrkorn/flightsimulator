@@ -23,6 +23,13 @@ const SPEED_HYSTERESIS = 0.75
 // drawn - short of the canvas edge at 400, so the labels fit too
 const LADDER_EXTENT = 370
 
+// the gun cross's arms: from the centre, pixels, where they start and end
+const GUN_CROSS_GAP = 6
+const GUN_CROSS_ARM = 22
+
+// the pitch ladder's extra line with the gear down, degrees
+const APPROACH_PITCH_LINE = -2.5
+
 // how far out from the centre the speed and altitude boxes point, pixels -
 // beyond the horizon line's ends, at 350
 const SIDE_LABEL_OFFSET = 380
@@ -65,9 +72,7 @@ const SEA_LEVEL_SOUND_SPEED = 661.47 // knots
 // shock wave, which the impact pressure is worked out through.
 function calibratedAirspeed(staticPressure, mach) {
   const impactRatio =
-    mach < 1
-      ? (1 + 0.2 * mach * mach) ** 3.5 - 1
-      : (166.92158 * mach ** 7) / (7 * mach * mach - 1) ** 2.5 - 1
+    mach < 1 ? (1 + 0.2 * mach * mach) ** 3.5 - 1 : (166.92158 * mach ** 7) / (7 * mach * mach - 1) ** 2.5 - 1
   const impactPressure = staticPressure * impactRatio
   return SEA_LEVEL_SOUND_SPEED * Math.sqrt(5 * ((impactPressure / SEA_LEVEL_PRESSURE + 1) ** (2 / 7) - 1))
 }
@@ -141,7 +146,15 @@ export default class HUDObject {
     compassOffset,
     weightOnWheels = false,
     gearDown = false,
+    fuel = null,
+    landingMode = false,
   ) {
+    // the gun cross, where the nose points - in the flight control system's
+    // landing mode, as in the real aircraft with the gear down
+    this.showGunCross = landingMode
+    // the internal fuel left, 0 to 1 - see drawFuel
+    this.fuel = fuel ? fuel.fraction : null
+
     // the heading as it is, for the heading scale to move smoothly with, and
     // to the whole degree, for the number in its box
     this.headingExact = MathUtils.RAD2DEG * airplaneState.psi + compassOffset
@@ -193,6 +206,10 @@ export default class HUDObject {
     this.showFlightPath = groundSpeed >= FLIGHT_PATH_SHOWN_ABOVE_KT
     this.showAoaBracket = gearDown && this.showAoa
     this.showVerticalVelocity = gearDown
+    // the 2.5 degree dive line, between the horizon and the 5 degree one,
+    // as in the real aircraft with the gear down: a flight path marker on
+    // it is a glide path near enough to a runway's 3 degrees
+    this.showApproachPitchLine = gearDown
     this.mach = atmosphericModel.rmach.toFixed(2)
     this.altitudeFeet = Math.round(airplaneState.alt)
 
@@ -379,6 +396,18 @@ export default class HUDObject {
         }
       }
     }
+
+    // see showApproachPitchLine - shorter than the others, without the
+    // bent ends or numbers
+    if (this.showApproachPitchLine) {
+      const offset = -this.angleToPixels(APPROACH_PITCH_LINE - pitch)
+      if (Math.abs(offset + this.boresightY - this.height / 2) < LADDER_EXTENT) {
+        this.ctx.moveTo(-110, offset)
+        this.ctx.lineTo(-50, offset)
+        this.ctx.moveTo(50, offset)
+        this.ctx.lineTo(110, offset)
+      }
+    }
     this.ctx.stroke()
 
     // reset line style and transform
@@ -558,6 +587,17 @@ export default class HUDObject {
     ctx.restore()
   }
 
+  // The internal fuel left, percent, at the bottom right: level with the
+  // angle of attack's line on the left, and ending as far right of the
+  // centre as that starts left of it
+  drawFuel(right, y) {
+    const ctx = this.ctx
+    ctx.save()
+    ctx.textAlign = "right"
+    ctx.fillText(`F ${Math.round(100 * Math.min(Math.max(this.fuel, 0), 1))}%`, right, y)
+    ctx.restore()
+  }
+
   draw() {
     this.ctx.clearRect(0, 0, this.width, this.height)
 
@@ -611,6 +651,8 @@ export default class HUDObject {
       this.ctx.fillText(`AB`, left + 160, 0.9 * this.height)
     }
 
+    if (this.fuel !== null) this.drawFuel(centre + LEFT_COLUMN, 0.9 * this.height)
+
     const gText = "" + this.g.toFixed(1)
 
     this.ctx.fillText(`${gText} G`, left, 0.2 * this.height)
@@ -618,5 +660,21 @@ export default class HUDObject {
     this.drawPitchLadder()
     if (this.showFlightPath) this.drawFlightPathMarker()
     if (this.showAoaBracket) this.drawAoaBracket()
+    if (this.showGunCross) this.drawGunCross()
+  }
+
+  // A cross on the aircraft's nose direction - the boresight, where the
+  // pitch ladder's lines are read against: fixed in the HUD, so it moves
+  // over the ladder with the pitch, and against the flight path marker by
+  // the angle of attack and sideslip
+  drawGunCross() {
+    const x = this.width / 2
+    const y = this.boresightY
+    this.ctx.beginPath()
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      this.ctx.moveTo(x + GUN_CROSS_GAP * dx, y + GUN_CROSS_GAP * dy)
+      this.ctx.lineTo(x + GUN_CROSS_ARM * dx, y + GUN_CROSS_ARM * dy)
+    }
+    this.ctx.stroke()
   }
 }

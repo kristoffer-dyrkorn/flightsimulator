@@ -26,7 +26,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 
 - `q` and `a`: throttle (the afterburner kicks in above 80% throttle)
 - `s` set throttle to idle
-- `1` and `2`: close / open the air brakes
+- `1` and `2`: close / open the air brakes fully (in landing mode they open less to avoid tail strikes when landing, once all wheels are on the ground they open again fully)
 - `g` extend/retract landing gears and also enable/disable landing mode
 - `z` and `x`: rudder (nose gear control when on a runway)
 - `b` wheel brakes when on a runway
@@ -37,6 +37,9 @@ The simulator has a flight control system (FCS). This means you provide input, a
 - `j` and `l`: rotate the cockpit view or external camera left and right
 - `i` and `k`: rotate the external camera up and down
 - `,` and `.`: move the external camera nearer/further away
+- `p`: pause the simulator (press again to continue)
+- `r` when the simulator is paused, or after a crash: replay the last 2 minutes, during the replay the views can be changed just as when flying
+- `e`: leave the replay and go back to paused flight or crash screen
 
 ## Landing the plane
 
@@ -61,6 +64,12 @@ You will need to flare before touchdown. Just before touchdown, set the throttle
 ## Release notes
 
 Features after July 2025 have been made using AI.
+
+#### November 2026:
+
+- Added replay mode
+- Added glide scope indicator when in landing mode and lined up with a runway
+- Added modelling of fuel consumption and fuel weight
 
 #### October 2026:
 

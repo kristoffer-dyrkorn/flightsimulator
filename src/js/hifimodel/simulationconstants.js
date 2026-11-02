@@ -111,20 +111,10 @@ SimulationConstants.BRAKE_FRICTION_COEFF_MAX = 0.6
 SimulationConstants.NOSEWHEEL_STEER_MAX = 32 // degrees
 SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL = 0.3
 
-/* Ground-contact detection (index.js's collision check) - how a gear-down
-   touch is told apart from a crash. There's no structural gear model yet
-   (see the landing plan this came out of), so these don't decide how the
-   aircraft *behaves* on contact, only whether contact ends the flight.
-
-   GEAR_CONTACT_CLEARANCE is in meters, not feet like the rest of this file -
-   it's consumed directly by a raycast against the terrain mesh, which is
-   built in meters, and converting it back and forth to match the rest of
-   this file would just add a conversion for no benefit. A wheel's own
-   raycast origin sits at its hub, roughly a wheel radius above where the
-   tire would actually touch (the main wheels are about 0.65 m in diameter),
-   so this needs to be at least that, with a little more for the tire's own
-   compression and to trigger the check slightly before the wheel is
-   already through the ground rather than after.
+/* Touchdown (see touchdown in index.js) - what makes the tyres reaching the
+   ground a landing rather than a crash, judged at the physics step they
+   touch. The airframe hitting the ground is a crash too - see HARD_POINTS
+   in landinggearmodel.js.
 
    MAX_SAFE_SINK_RATE and MAX_SAFE_BANK are both estimates, not specs pulled
    from anywhere - a fighter's gear is commonly designed for something on
@@ -132,7 +122,6 @@ SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL = 0.3
    wingtip or store before the far main gear even arrives, so both are set
    with real margin under where actual damage would plausibly start rather
    than tuned to a source. */
-SimulationConstants.GEAR_CONTACT_CLEARANCE = 0.5 // m
 SimulationConstants.MAX_SAFE_SINK_RATE = 600 // ft/min
 SimulationConstants.MAX_SAFE_BANK = 7 // degrees
 

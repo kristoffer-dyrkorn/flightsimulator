@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js"
 import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js"
 import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
 import { useHorizonFog } from "../sky/horizonFog.js"
+import { useLandingLight } from "../graphics/landingLight.js"
 
 const url = new URL(document.location)
 const urlParams = url.searchParams
@@ -34,6 +35,8 @@ export default class Tile {
     this.tileMesh.material.color = Tile.light
     // fading with distance into the haze, in the horizon's colour behind it
     useHorizonFog(this.tileMesh.material)
+    // and lit by the aircraft's landing light at night
+    useLandingLight(this.tileMesh.material)
   }
 
   update(camera, showWireFrame) {
