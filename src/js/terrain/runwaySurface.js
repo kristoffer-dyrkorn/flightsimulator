@@ -40,6 +40,8 @@ const GLYPH_HEIGHT = 9 // m
 const GLYPH_CELL = [5, 10]
 const GLYPH_BASELINE = 0.5
 const PX_PER_M = 32
+// paved shoulder either side of a runway, beyond its edge stripes (m)
+const SHOULDER_WIDTH = 9
 
 // for each glyph, m: the middle of its ink from where it starts, and how far
 // on the next glyph starts - once the font is in
@@ -180,6 +182,12 @@ uniform sampler2D runwayGlyphs;
 const vec3 ASPHALT = vec3(0.075, 0.075, 0.08);
 const vec3 RUBBER = vec3(0.03, 0.03, 0.032);
 const vec3 PAINT = vec3(0.62, 0.62, 0.6);
+// the shoulders: paved, unmarked, a little greyer than the runway, either
+// side of it - out to 63 m across in all on a 45 m runway - and fading
+// into the ground round them over their outer metres
+const vec3 SHOULDER = vec3(0.1, 0.1, 0.1);
+const float SHOULDER_WIDTH = ${SHOULDER_WIDTH.toFixed(1)};
+const float SHOULDER_FADE = 2.0;
 
 // how much of [a, b] a pixel's footprint covers - width w, centred on x
 float band(float x, float w, float a, float b) {
@@ -262,9 +270,13 @@ float endMarkings(vec2 sc, vec2 w, vec2 dsdx, vec2 dsdy, float halfWidth, float 
   // ahead of a displaced threshold: a stripe across, and arrows towards it
   paint = max(paint, band(s, w.x, -1.8, 0.0) * band(ac, w.y, 0.0, halfWidth - 0.9));
   if (s < -10.0) {
-    float along = mod(s, 60.0); // each arrow 30 m long, its head at 30
-    float shaft = band(along, w.x, 0.0, 20.0) * band(ac, w.y, 0.0, 0.45);
-    float head = band(along, w.x, 20.0, 30.0) * smoothstep(0.5 * w.y, -0.5 * w.y, ac - 0.3 * (30.0 - along));
+    float along = mod(s, 60.0); // each arrow 30 m long, its tip at 30
+    // the shaft runs up into the tip, where the head's arms meet over it
+    float shaft = band(along, w.x, 0.0, 28.5) * band(ac, w.y, 0.0, 0.45);
+    // the head an open V: two arms 0.9 m wide, from the tip back 10 m, to
+    // 3 m either side
+    float arm = ac - 0.3 * (30.0 - along);
+    float head = band(along, w.x, 20.0, 30.0) * band(arm, w.y + 0.3 * w.x, -0.94, 0.0);
     paint = max(paint, max(shaft, head));
   }
   return paint;
@@ -296,7 +308,15 @@ vec3 paintRunways(vec2 ground, vec3 photo) {
     vec2 dsdy = dFdy(sc);
     vec2 w = max(abs(dsdx) + abs(dsdy), vec2(1e-3));
     float halfWidth = extent.z;
-    float paved = band(sc.x, w.x, extent.x, extent.y) * band(sc.y, w.y, -halfWidth, halfWidth);
+    float along = band(sc.x, w.x, extent.x, extent.y);
+    float outer = halfWidth + SHOULDER_WIDTH;
+    float shoulder = along * (1.0 - smoothstep(outer - SHOULDER_FADE, outer, abs(sc.y)));
+    if (shoulder <= 0.0) continue;
+    float paved = along * band(sc.y, w.y, -halfWidth, halfWidth);
+
+    float detail = 1.0 - smoothstep(0.5, 4.0, max(w.x, w.y));
+    float patches = runwayNoise(sc * vec2(0.08, 0.25)) * 0.6 + runwayNoise(sc * vec2(0.5, 1.5)) * 0.4 * detail;
+    colour = mix(colour, SHOULDER * (0.8 + 0.4 * patches), shoulder);
     if (paved <= 0.0) continue;
 
     // the other end's frame: from its threshold, back the other way
@@ -306,8 +326,6 @@ vec3 paintRunways(vec2 ground, vec3 photo) {
 
     // asphalt, patchy, with rubber laid down along the middle where wheels
     // touch down - faded out where it's finer than a pixel
-    float detail = 1.0 - smoothstep(0.5, 4.0, max(w.x, w.y));
-    float patches = runwayNoise(sc * vec2(0.08, 0.25)) * 0.6 + runwayNoise(sc * vec2(0.5, 1.5)) * 0.4 * detail;
     vec3 surface = ASPHALT * (0.85 + 0.3 * patches);
     float streaks = runwayNoise(vec2(end.x * 0.02, end.y * 1.2)) * mix(0.5, runwayNoise(vec2(end.x * 0.3, end.y * 3.0)), detail);
     float rubber = smoothstep(150.0, 300.0, end.x) * (1.0 - smoothstep(700.0, 1000.0, end.x)) * (1.0 - smoothstep(4.0, 10.0, abs(end.y)));
