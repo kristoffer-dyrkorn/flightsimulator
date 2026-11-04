@@ -4,6 +4,7 @@ import { KTX2Loader } from "three/addons/loaders/KTX2Loader.js"
 import { MeshoptDecoder } from "../externals/meshopt_decoder.module"
 import { useHorizonFog } from "../sky/horizonFog.js"
 import { useLandingLight } from "../graphics/landingLight.js"
+import { useRunwaySurface, setRunwaySurfaces } from "./runwaySurface.js"
 
 const url = new URL(document.location)
 const urlParams = url.searchParams
@@ -37,6 +38,8 @@ export default class Tile {
     useHorizonFog(this.tileMesh.material)
     // and lit by the aircraft's landing light at night
     useLandingLight(this.tileMesh.material)
+    // with its runways painted on, sharper than the photos show them
+    useRunwaySurface(this.tileMesh.material)
   }
 
   update(camera, showWireFrame) {
@@ -101,6 +104,7 @@ export default class Tile {
     // in place as early as the rest of this tile's data.
     this.terrain.runways.load(this.tileName)
     this.terrain.sceneryLights.load(this.tileName)
+    this.terrain.runways.surfaces(this.tileName).then((runways) => setRunwaySurfaces(this.tileMesh.material, runways))
 
     Tile.gltfLoader.load(
       `${SERVER}/glb50/${this.tileName}.glb`,

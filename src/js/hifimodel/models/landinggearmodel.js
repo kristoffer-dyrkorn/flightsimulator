@@ -127,11 +127,17 @@ function progressiveSpringForce(penetration, stages) {
    deliberately higher, so the oil orifices choke the strut pushing back
    out after a hard compression instead of letting it spring back and
    unload the tires, which is what actually keeps a landing gear "glued"
-   to the runway rather than bouncing. */
+   to the runway rather than bouncing.
+
+   The nose gear's compression damping is three times that midpoint. At
+   the midpoint the aircraft pitching on its soft nose spring, about the
+   main wheels, is damped at only about 0.16 of critical, so braking set
+   the nose rocking; three times that is about 0.5, which an oleo strut is
+   tuned to. */
 const MAIN_GEAR_DAMPING_COMPRESSION = ((15000 + 22000) / 2) * N_S_PER_M_TO_LB_S_PER_FT
 const MAIN_GEAR_DAMPING_EXTENSION = MAIN_GEAR_DAMPING_COMPRESSION * 2.5
 
-const NOSE_GEAR_DAMPING_COMPRESSION = ((5000 + 8500) / 2) * N_S_PER_M_TO_LB_S_PER_FT
+const NOSE_GEAR_DAMPING_COMPRESSION = 3 * ((5000 + 8500) / 2) * N_S_PER_M_TO_LB_S_PER_FT
 const NOSE_GEAR_DAMPING_EXTENSION = NOSE_GEAR_DAMPING_COMPRESSION * 2.5
 
 /* Tire friction coefficients, applied against each leg's own current

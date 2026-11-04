@@ -1,5 +1,7 @@
 import { SERVER } from "./tile.js"
 import RunwayLights, { thresholdsIn } from "./runwayLights.js"
+import { LETTER_GLYPH } from "./runwaySurface.js"
+
 
 // tileName + ".json" for every tile that actually has a runway geojson
 // sidecar file. Only these are ever fetched - the rest are open terrain,
@@ -289,6 +291,46 @@ export default class RunwayRegistry {
   }
 
   /**
+   * The runways to paint on a tile, as setRunwaySurfaces takes them, in its
+   * own coordinates: each runway in the tile's runway file, placed by its
+   * threshold lights - which can be in a neighbouring tile's file - or else
+   * by the ends of its outline. A runway reaching across tiles is in each
+   * of their files, cut at the tile's edge, so its outline is put back
+   * together from all of them first.
+   */
+  surfaces(tileName) {
+    const names = [tileName, ...neighbours(tileName)]
+    return Promise.all(names.map((name) => this.fetch(name))).then((files) => {
+      // each runway's parts, in this tile's coordinates
+      const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
+      const parts = new Map()
+      files.forEach((features, i) => {
+        const [, fx, fy] = names[i].match(/^(-?\d+)-(-?\d+)$/).map(Number)
+        for (const feature of features ?? []) {
+          if (feature.properties.aeroway !== "runway") continue
+          if (!parts.has(feature.id)) parts.set(feature.id, [])
+          for (const outline of extractPolygons(feature.geometry)) {
+            parts.get(feature.id).push(outline.map(([px, py]) => [px + fx - x, py + fy - y]))
+          }
+        }
+      })
+
+      const runways = []
+      for (const feature of files[0] ?? []) {
+        const p = feature.properties
+        if (p.aeroway !== "runway") continue
+        const airport = feature.id.split("/")[0]
+        const ends = p.ref.split("-")
+        const thresholds = ends.map((end) => this.thresholds.get(`${airport}/${p.ref}/${end}`))
+        const local = thresholds.every(Boolean) ? thresholds.map(([tx, ty]) => [tx - x, ty - y]) : null
+        const runway = runwaySurface(parts.get(feature.id), ends, local)
+        if (runway) runways.push(runway)
+      }
+      return runways
+    })
+  }
+
+  /**
    * Marks one tile inactive - call once a tile itself has been unloaded,
    * so the dynamic list of "runways currently in play" tracks which tiles
    * are actually resident, the same as the terrain mesh does. The parsed
@@ -317,6 +359,64 @@ export default class RunwayRegistry {
     if (!polygons) return false
 
     return polygons.some((polygon) => pointInPolygon(x, y, polygon))
+  }
+}
+
+// a runway, as setRunwaySurfaces takes it, from its outline - in one part
+// or more - and its designators ("07", "25", "01L"...): between the
+// thresholds given, or the ends of the outline
+function runwaySurface(parts, ends, thresholds) {
+  const outline = parts.flat()
+  const designators = ends.map((end) => end.match(/^(\d{1,2})([LCR]?)$/))
+  if (designators.length !== 2 || !designators.every(Boolean)) return null
+
+  let origin, direction, length
+  if (thresholds) {
+    const [[ax, ay], [bx, by]] = thresholds
+    length = Math.hypot(bx - ax, by - ay)
+    origin = [ax, ay]
+    direction = [(bx - ax) / length, (by - ay) / length]
+  } else {
+    // along the outline's longest side, from the end it is landed on first
+    let longest = 0
+    for (const part of parts) {
+      for (let i = 1; i < part.length; i++) {
+        const dx = part[i][0] - part[i - 1][0]
+        const dy = part[i][1] - part[i - 1][1]
+        if (Math.hypot(dx, dy) > longest) {
+          longest = Math.hypot(dx, dy)
+          direction = [dx / longest, dy / longest]
+        }
+      }
+    }
+    const bearing = (Math.atan2(direction[0], direction[1]) / DEG + 360) % 360
+    const difference = Math.abs(((bearing - 10 * Number(designators[0][1]) + 540) % 360) - 180)
+    if (difference > 90) direction = [-direction[0], -direction[1]]
+    origin = outline[0]
+  }
+
+  // the outline in that frame - along from the first threshold, and across
+  const along = outline.map(([px, py]) => (px - origin[0]) * direction[0] + (py - origin[1]) * direction[1])
+  const across = outline.map(([px, py]) => (px - origin[0]) * direction[1] - (py - origin[1]) * direction[0])
+  let from = Math.min(...along)
+  let to = Math.max(...along)
+  const middle = (Math.min(...across) + Math.max(...across)) / 2
+  // centred on the middle of the outline
+  origin = [origin[0] + middle * direction[1], origin[1] - middle * direction[0]]
+  if (!thresholds) {
+    origin = [origin[0] + from * direction[0], origin[1] + from * direction[1]]
+    length = to - from
+    to -= from
+    from = 0
+  }
+  return {
+    origin,
+    direction,
+    from,
+    to,
+    halfWidth: (Math.max(...across) - Math.min(...across)) / 2,
+    length,
+    designators: designators.flatMap(([, number, letter]) => [Number(number), letter ? LETTER_GLYPH[letter] : -1]),
   }
 }
 

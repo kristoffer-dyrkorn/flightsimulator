@@ -9,3 +9,6 @@ src/texture
 src/texture-hires
 src/runways
 src/scenery
+
+# screenshots Claude takes while testing, linked from its replies
+.claude-shots

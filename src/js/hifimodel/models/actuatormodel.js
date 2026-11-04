@@ -104,9 +104,12 @@ const SURFACES = [
   },
   {
     // wheel brake pedal position, 0..1 - a fast hydraulic response rather
-    // than a bandwidth-limited surface, but not instant either
+    // than a bandwidth-limited surface, but not instant either. Slowed to
+    // the pace of a pilot squeezing the pedals on, since a keypress stamps
+    // on them: a step of braking load on the nose strut sets the nose
+    // rocking
     name: "brake",
-    rate: 4, // full travel in about 0.25s
+    rate: 2, // full travel in about 0.5s
     tau: 1 / 20.2,
     min: 0,
     max: 1,
