@@ -332,9 +332,20 @@ const externalCameraPosition = {
   compass: 0,
   compassSpeed: 0,
   inclination: 90,
+  inclinationSpeed: 0,
+  // the distance changes by this share of itself a second - so zooming is as
+  // smooth close in as far out
+  distanceRate: 0,
 }
 
+// each press of a camera key changes how fast the camera moves, not where it
+// is: by this many degrees a second round or up and down
 const EXTERNAL_CAMERA_SLEW_STEP = 4.8
+// and by this share of the distance a second, nearer or further
+const EXTERNAL_CAMERA_ZOOM_STEP = 0.15
+// from straight above to straight below
+const EXTERNAL_CAMERA_MIN_INCLINATION = 0
+const EXTERNAL_CAMERA_MAX_INCLINATION = 180
 
 // The pilot's eye point, meters, in the aircraft frame (x right, y forward,
 // z up, from the centre of gravity) - the model's own, see F16_EYE_POSITION
@@ -1209,7 +1220,7 @@ function drawView(view, frameTime) {
       cameras[2].rotateX(externalCameraPosition.inclination * MathUtils.DEG2RAD)
       cameras[2].translateZ(externalCameraPosition.distance)
 
-      externalCameraPosition.compass += externalCameraPosition.compassSpeed * frameTime * 0.001
+      moveExternalCamera(frameTime * 0.001)
       break
   }
 
@@ -1605,17 +1616,17 @@ function keyboardHandler(keyboardEvent) {
       break
     case "i": // cockpit: look straight ahead - external cam: up
       if (lookFromCockpit("i")) break
-      externalCameraPosition.inclination -= 2
+      externalCameraPosition.inclinationSpeed -= EXTERNAL_CAMERA_SLEW_STEP
       break
     case "k": // cockpit: look back - external cam: down
       if (lookFromCockpit("k")) break
-      externalCameraPosition.inclination += 2
+      externalCameraPosition.inclinationSpeed += EXTERNAL_CAMERA_SLEW_STEP
       break
     case ",": // external cam nearer
-      externalCameraPosition.distance = Math.max(EXTERNAL_CAMERA_MIN_DISTANCE, externalCameraPosition.distance - 10)
+      externalCameraPosition.distanceRate -= EXTERNAL_CAMERA_ZOOM_STEP
       break
     case ".": // external cam farer
-      externalCameraPosition.distance += 10
+      externalCameraPosition.distanceRate += EXTERNAL_CAMERA_ZOOM_STEP
       break
     case "1": // speed brakes closed
       airplaneControlInput.speedbrake = SimulationConstants.SPEEDBRAKE_MIN
@@ -1705,6 +1716,25 @@ function lookFromCockpit(key) {
       break
   }
   return true
+}
+
+// moves the external camera on by dt seconds at the speeds the camera keys
+// have set - stopping up and down, or nearer, where it can go no further
+function moveExternalCamera(dt) {
+  const p = externalCameraPosition
+  p.compass += p.compassSpeed * dt
+
+  p.inclination += p.inclinationSpeed * dt
+  if (p.inclination < EXTERNAL_CAMERA_MIN_INCLINATION || p.inclination > EXTERNAL_CAMERA_MAX_INCLINATION) {
+    p.inclination = MathUtils.clamp(p.inclination, EXTERNAL_CAMERA_MIN_INCLINATION, EXTERNAL_CAMERA_MAX_INCLINATION)
+    p.inclinationSpeed = 0
+  }
+
+  p.distance *= Math.exp(p.distanceRate * dt)
+  if (p.distance < EXTERNAL_CAMERA_MIN_DISTANCE) {
+    p.distance = EXTERNAL_CAMERA_MIN_DISTANCE
+    p.distanceRate = 0
+  }
 }
 
 // glides the view towards where the pilot wants to look - easing in over
