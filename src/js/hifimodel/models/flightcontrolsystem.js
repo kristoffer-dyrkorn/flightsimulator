@@ -146,9 +146,10 @@ const GROUND_VANE_VALID_KT = 60
    the pilot asks. It takes over again from wherever the pilot left the
    flight path, LANDING_STICK_RELEASE_DELAY after the stick is centred.
 
-   Everything ends up as a g command, capped at LANDING_NZ_MAX so lowering
-   the gear well above approach speed eases the nose up rather than pulling
-   hard, and the angle of attack limiter below still applies. The flight
+   Everything ends up as a g command, the hold's part capped at
+   LANDING_NZ_MAX so lowering the gear well above approach speed eases the
+   nose up rather than pulling hard, and the angle of attack limiter below
+   still applies. The flight
    path is the one over the ground, as a glide path is. */
 const LANDING_AOA = 13 /* deg, on speed */
 const LANDING_AOA_PATH_P = 3 /* deg of flight path per deg of angle of attack error */
@@ -165,8 +166,8 @@ const LANDING_AOA_SWING_MAX = 1.5 /* deg */
 const LANDING_STICK_DEADBAND = 0.01 /* stick deflection that counts as centred */
 const LANDING_STICK_RELEASE_DELAY = 1.0 /* s after the stick is centred */
 /* While the pilot holds the stick it asks for g, in proportion, on top of
-   what holds the flight path - up to LANDING_NZ_MAX at full aft stick, and
-   LANDING_STICK_G_FORWARD less at full forward - and the jet answers at
+   what holds the flight path - LANDING_NZ_MAX - 1 more at full aft stick,
+   and LANDING_STICK_G_FORWARD less at full forward - and the jet answers at
    once, as it should in a flare. Once the stick is centred, the flight path
    held is the one that g would have reached, had the jet answered it
    instantly, so a short input isn't cut off by the flight path's lag.
@@ -201,7 +202,16 @@ const LANDING_PATH_DESCENT_MAX = 20 /* deg */
 const LANDING_PATH_PILOT_MAX = 30 /* deg, climb or descent */
 const LANDING_PATH_RETURN_RATE = 1 /* deg/s */
 const LANDING_PATH_GAIN = 1.0 /* deg/s of flight path rate per deg of flight path error */
-const LANDING_NZ_MAX = 2.0 /* most g landing mode may pull */
+/* most g the flight path hold may pull beyond what holds the flight path in
+   the bank flown - the pilot's own stick input comes on top */
+const LANDING_NZ_MAX = 2.0
+/* In a bank, only the vertical part of the lift holds the flight path: at 60
+   degrees it takes 2 g. The flight path hold, and the stick's g on top, are
+   measured from that - wings-level only, a pull in a turn got the jet no
+   more than the g that kept it from sinking, and nothing happened. Steeper
+   than this the bank counts as this, so that near knife edge the hold
+   doesn't ask for ever more g. */
+const LANDING_BANK_MAX = 70 /* deg */
 
 /* Roll channel. The gain is high enough that full lateral stick puts the
    ailerons on their stops, so that a full roll command gets the roll rate the
@@ -434,6 +444,8 @@ export default class FlightControlSystem {
     if (landingMode) {
       const climbRate = -x.sinkRate / 60 // ft/s
       const flightPath = Math.asin(limit(climbRate / Math.max(x.vt, 1), -1, 1)) * SimulationConstants.RTOD
+      // see LANDING_BANK_MAX
+      const bankCos = Math.max(Math.cos(x.phi), Math.cos(LANDING_BANK_MAX * SimulationConstants.DTOR))
       // see LANDING_STICK_G_FORWARD
       const stickHeld = Math.abs(input.pitchStick) > LANDING_STICK_DEADBAND
       const aoaError = LANDING_AOA - alpha
@@ -486,7 +498,10 @@ export default class FlightControlSystem {
       const stickG = input.pitchStick * (input.pitchStick >= 0 ? LANDING_NZ_MAX - 1 : LANDING_STICK_G_FORWARD)
       if (stickHeld) {
         if (!this.landingStickHeld) this.landingStickPath = this.landingPathTarget
-        this.landingStickPath += ((stickG * SimulationConstants.G) / Math.max(x.vt, 1)) * SimulationConstants.RTOD * dt
+        // only the vertical part of the g moves the flight path - see
+        // LANDING_BANK_MAX
+        this.landingStickPath +=
+          ((stickG * bankCos * SimulationConstants.G) / Math.max(x.vt, 1)) * SimulationConstants.RTOD * dt
       }
       this.landingStickHeld = stickHeld
       let pathTarget = limit(stickHeld ? this.landingStickPath : unlimited, -LANDING_PATH_PILOT_MAX, LANDING_PATH_PILOT_MAX)
@@ -517,14 +532,12 @@ export default class FlightControlSystem {
       const pathRate = LANDING_PATH_GAIN * (pathTarget - flightPath)
 
       // holding the flight path against gravity takes cos(flight path) g,
-      // and turning it at that rate takes this much more - or, with the
-      // stick held, the g it asks for on top
-      nzStickCommand = limit(
-        Math.cos(flightPath * SimulationConstants.DTOR) +
-          (stickHeld ? stickG : (x.vt * pathRate * SimulationConstants.DTOR) / SimulationConstants.G),
-        0,
-        LANDING_NZ_MAX,
-      )
+      // more in a bank - see LANDING_BANK_MAX - and turning it at that rate
+      // takes this much more, up to LANDING_NZ_MAX; or, with the stick held,
+      // the g it asks for on top
+      const holdG = Math.cos(flightPath * SimulationConstants.DTOR) / bankCos
+      const pathG = (x.vt * pathRate * SimulationConstants.DTOR) / SimulationConstants.G / bankCos
+      nzStickCommand = Math.max(0, holdG + (stickHeld ? stickG : Math.min(pathG, LANDING_NZ_MAX - 1)))
     }
     this.landingMode = landingMode
 

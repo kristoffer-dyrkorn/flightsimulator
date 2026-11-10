@@ -38,7 +38,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 - `i` and `k`: rotate the external camera up and down
 - `,` and `.`: move the external camera nearer/further away
 - `p`: pause the simulator (press again to continue)
-- `r` when the simulator is paused, or after a crash: replay the last 2 minutes, during the replay the views can be changed just as when flying
+- `r` when the simulator is paused, or after a crash: replay the last 2 minutes, and during the replay the views can be changed just as when flying
 - `e`: leave the replay and go back to paused flight or crash screen
 
 ## Landing the plane
@@ -47,11 +47,11 @@ You can land the plane on any of Norway's runways. For a successful landing you 
 
 To start the approach, slow down the aircraft and extend the landing gears below around 250 knots. Also apply air brakes. Adjust the throttle and the attitude of the plane until you get a speed of around 160 knots and an angle of attack of 12 to 13 degrees. Then the aircraft will be set up for a reasonably correct glide path.
 
-When the landing gear is extended the flaps will be automatically deployed and the flight control system enters a "landing mode". The HUD will now show a vertical bar (the approach bracket) below the horizon line. The heading indicator (showing compass direction) will move to the top of the HUD. While on approach, try to place the flight path indicator (the circle with horizontal and vertical lines on it) in the middle of the approach bar, and so that the flight path indicator is placed on the touchdown point on the runway. When on approach you control the sink rate by adjusting the speed, not by adjusting the pitch of the plane.
+When the landing gear is extended the flaps will be automatically deployed and the flight control system enters a "landing mode". The HUD will now show a vertical bar (the approach bracket) below the horizon line. The heading indicator (showing compass direction) will move to the top of the HUD. While on approach, try to place the flight path indicator (the circle with horizontal and vertical lines on it) in the middle of the approach bar, so that the flight path indicator is placed on the touchdown point on the runway. When on approach you adjust the sink rate by correcting the speed and not the pitch.
 
-Be aware that at touch down the sink rate should be less than 600 ft/min. While landing mode there is an indicator on the right side, next to the altitude meter, that shows the climb rate/sink rate, measured in 1000 ft/min. At touchdown the pointer should be close to - or above - the first tick below zero.
+Be aware that at touch down the sink rate should be less than 600 ft/min, else the landing is too hard. While in landing mode, an indicator on the right side (next to the altitude meter) shows the climb rate/sink rate - measured in 1000 ft/min. At touchdown the pointer should be close to - or above - the first tick below zero.
 
-You will need to flare before touchdown. At touchdown, set the throttle to idle and then apply wheel brakes.
+You will need to flare before touchdown. At touchdown, set the throttle to idle, let the plane roll on its back wheels for a short while to reduce its speed, and then apply wheel brakes.
 
 ## Screenshots
 
