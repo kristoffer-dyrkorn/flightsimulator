@@ -23,6 +23,18 @@ const SPEED_HYSTERESIS = 0.75
 // drawn - short of the canvas edge at 400, so the labels fit too
 const LADDER_EXTENT = 370
 
+// a pitch bar's halves, pixels: the gap either side of the centre to their
+// inner ends, their length, and the tick at the inner end - see drawPitchBar
+const PITCH_BAR_GAP = 50
+const PITCH_BAR_LENGTH = 100
+const PITCH_BAR_TICK = 15
+// how far each half is tilted, as a share of the bar's pitch angle
+const PITCH_BAR_TILT = 0.25
+// and how far from its outer ends the middle of its numbers is - below the
+// bars above the horizon, and above those below it
+const PITCH_LABEL_OFFSET_POSITIVE = 25
+const PITCH_LABEL_OFFSET_NEGATIVE = 23
+
 // the gun cross's arms: from the centre, pixels, where they start and end
 const GUN_CROSS_GAP = 6
 const GUN_CROSS_ARM = 22
@@ -348,21 +360,7 @@ export default class HUDObject {
           this.ctx.moveTo(50, offset)
           this.ctx.lineTo(350, offset)
         } else {
-          this.ctx.moveTo(-150, offset)
-          this.ctx.lineTo(-50, offset)
-          this.ctx.lineTo(-50, offset + 15)
-
-          this.ctx.moveTo(50, offset + 15)
-          this.ctx.lineTo(50, offset)
-          this.ctx.lineTo(150, offset)
-
-          if (deg >= 10) {
-            this.ctx.fillText(deg, -180, offset + 25)
-            this.ctx.fillText(deg, 135, offset + 25)
-          } else {
-            this.ctx.fillText(deg, -165, offset + 25)
-            this.ctx.fillText(deg, 140, offset + 25)
-          }
+          this.drawPitchBar(deg, offset)
         }
       }
     }
@@ -379,21 +377,7 @@ export default class HUDObject {
 
       // only draw pitch lines that fit on the HUD
       if (Math.abs(offset + this.boresightY - this.height / 2) < LADDER_EXTENT) {
-        this.ctx.moveTo(-150, offset)
-        this.ctx.lineTo(-50, offset)
-        this.ctx.lineTo(-50, offset - 15)
-
-        this.ctx.moveTo(50, offset - 15)
-        this.ctx.lineTo(50, offset)
-        this.ctx.lineTo(150, offset)
-
-        if (deg <= -10) {
-          this.ctx.fillText(-deg, -180, offset + 25)
-          this.ctx.fillText(-deg, 135, offset + 25)
-        } else {
-          this.ctx.fillText(-deg, -165, offset + 25)
-          this.ctx.fillText(-deg, 140, offset + 25)
-        }
+        this.drawPitchBar(deg, offset)
       }
     }
 
@@ -413,6 +397,39 @@ export default class HUDObject {
     // reset line style and transform
     this.ctx.setLineDash([])
     this.ctx.setTransform(1, 0, 0, 1, 0, 0)
+  }
+
+  // One pitch bar, deg above the horizon (below if negative), offset pixels
+  // down from the boresight - into the current path, with its numbers. Each
+  // half is tilted by PITCH_BAR_TILT of the bar's angle about its inner
+  // end, the outer end away from the horizon, so any one bar shows which way
+  // the horizon is, and roughly how far: the 90 degree bars' halves are 135
+  // degrees apart. The tick at the inner end points towards the horizon,
+  // square to its half.
+  drawPitchBar(deg, offset) {
+    const tilt = Math.abs(deg) * PITCH_BAR_TILT * MathUtils.DEG2RAD
+    // the horizon is down the HUD from a bar above it, up from one below
+    const towards = Math.sign(deg)
+    const cos = Math.cos(tilt)
+    const sin = Math.sin(tilt)
+    // how far the outer ends come in, and down or up, from where a flat bar's are
+    const inward = PITCH_BAR_LENGTH * (1 - cos)
+    const drop = -towards * PITCH_BAR_LENGTH * sin
+
+    for (const side of [-1, 1]) {
+      const innerX = side * PITCH_BAR_GAP
+      this.ctx.moveTo(innerX + side * PITCH_BAR_LENGTH * cos, offset + drop)
+      this.ctx.lineTo(innerX, offset)
+      this.ctx.lineTo(innerX + side * PITCH_BAR_TICK * sin, offset + towards * PITCH_BAR_TICK * cos)
+    }
+
+    const label = Math.abs(deg)
+    const left = (label >= 10 ? -180 : -165) + inward
+    const right = (label >= 10 ? 135 : 140) - inward
+    // below the bars above the horizon, above those below it
+    const labelY = offset + drop + (deg > 0 ? PITCH_LABEL_OFFSET_POSITIVE : -PITCH_LABEL_OFFSET_NEGATIVE)
+    this.ctx.fillText(label, left, labelY)
+    this.ctx.fillText(label, right, labelY)
   }
 
   // The flight path marker is where the velocity over the ground points, as
