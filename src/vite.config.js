@@ -1,12 +1,12 @@
 import { defineConfig } from "vite"
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   server: {
     port: 8000,
     open: "?local",
   },
-  // comment out when running locally
-  // base: "/flightsimulator/",
+  // base folder for the app depends on local build / prod build
+  base: command === "build" ? "/flightsimulator/" : "/",
   plugins: [
     {
       name: "requestLogger",
@@ -18,4 +18,4 @@ export default defineConfig({
       },
     },
   ],
-})
+}))

@@ -6,7 +6,8 @@ import SimulationConstants from "./hifimodel/simulationconstants.js"
  * happened:
  *
  *   a touchdown:  gear (percent extended), sink (ft/min), bank (deg),
- *                 off (the legs off the runway) - those that failed
+ *                 speed (kt, over the ground), off (the legs off the
+ *                 runway) - those that failed
  *   strike        the part that hit the ground, with pitch, bank,
  *                 speedbrake, stabilator (deg)
  *   runoff        the legs that ran off the runway
@@ -58,6 +59,10 @@ export function describeCrash(values) {
     if (has("bank")) {
       reasons.push("The wings were not level at touchdown.")
       details.push(`Bank: ${values.bank}° (max ${SimulationConstants.MAX_SAFE_BANK}°)`)
+    }
+    if (has("speed")) {
+      reasons.push("The touchdown was too fast - the tyres burst.")
+      details.push(`Ground speed: ${values.speed} kt (max ${SimulationConstants.MAX_TYRE_SPEED} kt)`)
     }
     if (has("off")) {
       reasons.push("The aircraft touched down outside the runway.")

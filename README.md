@@ -43,7 +43,7 @@ The simulator has a flight control system (FCS). This means you provide input, a
 
 ## Landing the plane
 
-You can land the plane on any of Norway's runways. For a successful landing you must touch down inside the perimeter of the runway, have a sink rate of less than 600 feet/minute, and a banking angle of less than 7 degrees. You must also land on the wheels - ie not let any parts of the fuselage hit the runway.
+You can land the plane on any of Norway's runways. For a successful landing you must touch down inside the perimeter of the runway, have a sink rate of less than 600 feet/minute, a banking angle of less than 7 degrees, and a ground speed of less than 215 knots (else the tyres will burst). You must also land on the rear wheels and not let any parts of the fuselage hit the runway.
 
 To start the approach, slow down the aircraft and extend the landing gears below around 250 knots. Also apply air brakes. Adjust the throttle and the attitude of the plane until you get a speed of around 160 knots and an angle of attack of 12 to 13 degrees. Then the aircraft will be set up for a reasonably correct glide path.
 

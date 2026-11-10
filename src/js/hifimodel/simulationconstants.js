@@ -124,6 +124,10 @@ SimulationConstants.NOSEWHEEL_MAX_LATERAL_ACCEL = 0.3
    than tuned to a source. */
 SimulationConstants.MAX_SAFE_SINK_RATE = 600 // ft/min
 SimulationConstants.MAX_SAFE_BANK = 7 // degrees
+/* The main tyres are rated for a little over 210 kt - faster, they burst
+   spinning up at touchdown. By the speed over the ground, which is what the
+   tyres see: a tailwind, or a runway high up in thin air, brings it closer. */
+SimulationConstants.MAX_TYRE_SPEED = 215 // kt, over the ground
 
 // FCS limits to G, alpha and roll
 SimulationConstants.NZ_MAX = 9.0

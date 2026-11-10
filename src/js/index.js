@@ -43,7 +43,7 @@ import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
 import { sunPosition, twilight } from "./sky/sun.js"
-import { sunTransmittance, haze, luminance, GROUND_ALBEDO } from "./sky/atmosphere.js"
+import { sunTransmittance, terrainHaze, luminance, GROUND_ALBEDO, FOG_SHAPE } from "./sky/atmosphere.js"
 import SkyDome from "./sky/SkyDome.js"
 import { updateHorizonFog } from "./sky/horizonFog.js"
 import { updateLandingLight } from "./graphics/landingLight.js"
@@ -190,7 +190,7 @@ const scene = new Scene()
 // the horizon's averaged all round, for the aircraft.
 const sky = new SkyDome()
 scene.add(sky)
-scene.fog = new FogExp2(sky.fogColor, haze(0))
+scene.fog = new FogExp2(sky.fogColor, terrainHaze(0))
 // the sky's own colour, kept up to date by it as it changes
 scene.fog.color = sky.fogColor
 
@@ -200,10 +200,10 @@ scene.fog.color = sky.fogColor
 // material: density is then the share of light lost per meter. As FogExp2
 // was, it hid the terrain thirty kilometres off almost completely, leaving
 // distant mountains a flat white; through a clear day's air a quarter of
-// their own colour still shows at fifty.
+// their own colour still shows at fifty. Shaped by FOG_SHAPE - see there.
 ShaderChunk.fog_fragment = ShaderChunk.fog_fragment.replace(
   "fogDensity * fogDensity * vFogDepth * vFogDepth",
-  "fogDensity * vFogDepth",
+  `pow(fogDensity * vFogDepth, ${FOG_SHAPE.toFixed(2)})`,
 )
 
 // the aircraft lives in its own scene, which is shifted so that the
@@ -558,10 +558,9 @@ function updateSun() {
 
   sky.update(sunDirection, sun.elevation, altitude)
 
-  // as thick as the air halfway down from the aircraft to sea level, a
-  // rough middle of the air between it and the terrain it sees in the
-  // distance - thinner the higher it flies, above most of the haze
-  scene.fog.density = haze(altitude / 2)
+  // the air between the aircraft and the terrain it sees in the distance -
+  // thinner the higher it flies, above most of the haze
+  scene.fog.density = terrainHaze(altitude)
 
   return sun
 }
@@ -865,6 +864,7 @@ function recordTouchdown(legs) {
     // ft/min, positive = descending - at the start of the step they touched in
     sinkRate: previousAirplaneState.sinkRate,
     bank: Math.abs(previousAirplaneState.phi * SimulationConstants.RTOD), // deg
+    groundSpeed: previousAirplaneState.vt * SimulationConstants.FEET_PER_SECOND_TO_KNOTS, // kt
     // the handle down, and the gear all the way out - near enough: the
     // actuator closes in on its command along a lag, and never quite gets
     // there (see actuatormodel.js)
@@ -888,6 +888,7 @@ function landingFailures(arrival) {
   if (!arrival.gearDown) failures.gear = Math.floor(100 * arrival.gearPosition) // percent extended
   if (arrival.sinkRate >= SimulationConstants.MAX_SAFE_SINK_RATE) failures.sink = Math.round(arrival.sinkRate)
   if (arrival.bank >= SimulationConstants.MAX_SAFE_BANK) failures.bank = arrival.bank.toFixed(1)
+  if (arrival.groundSpeed > SimulationConstants.MAX_TYRE_SPEED) failures.speed = Math.round(arrival.groundSpeed)
   const off = legsOffRunway(arrival.legs)
   if (off.length > 0) failures.off = off.join(",")
   return failures

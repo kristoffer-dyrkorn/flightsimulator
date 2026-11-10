@@ -1,4 +1,5 @@
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, ShaderMaterial } from "three"
+import { FOG_SHAPE } from "../sky/atmosphere.js"
 import { SERVER } from "./tile.js"
 import { lightStreaks, streakFragmentPars, streakVertex, streakVertexPars } from "./lightStreaks.js"
 
@@ -110,7 +111,7 @@ const vertexShader = /* glsl */ `
     float distance = length(eye - position);
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(strength);
     float falloff = min(1.0, range / distance);
-    float haze = exp(-hazeDensity * ${HAZE_SHARE.toFixed(3)} * distance);
+    float haze = exp(-${HAZE_SHARE.toFixed(3)} * pow(hazeDensity * distance, ${FOG_SHAPE.toFixed(2)}));
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     // see EDGE_GAIN_MAX
     float offAxis = -mvPosition.z / length(mvPosition.xyz);
