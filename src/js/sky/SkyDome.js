@@ -37,11 +37,15 @@ const SKY_DISTANCE = 20000 // m
 // The exposed light is then brought into the range a screen shows, up to
 // SKY_CEILING - a little short of full white, which is kept for the sun's
 // own disc, so it always stands out as the brightest thing in the sky. Its
-// brightness (luminance) becomes SKY_CEILING * (1 - exp(-luminance)), so a
-// brighter part of
-// the sky is always shown brighter. Its colour is kept as far as the screen
-// allows: scaled down by its strongest colour, 1 - exp(-strongest), and
-// then, if that left it darker than its brightness should be, lightened
+// brightness (luminance) becomes tone(luminance), so a brighter part of the
+// sky is always shown brighter: SKY_CEILING * x / (1 + x^SKY_SHOULDER) ^
+// (1 / SKY_SHOULDER), which nears the ceiling slowly - a long, soft
+// shoulder. With 1 - exp(-x), as before, it got there so soon that all the
+// sky within some 15 degrees of a low sun came out the same near white, a
+// large flat glow, rather than one fading away from the sun. Its colour is
+// kept as far as the screen allows: scaled down by its strongest colour,
+// tone(strongest), and then, if that left it darker than its brightness
+// should be, lightened
 // towards white until it is not. So a bright saturated orange - the sky
 // right round a low sun - turns yellow and white the way it does in a
 // photograph, instead of being held at the dull brightness a pure orange can
@@ -52,6 +56,19 @@ const REFERENCE_HORIZON = new Color(0.74, 0.74, 0.82).convertSRGBToLinear()
 const ADAPTATION = 0.3
 const MAX_ADAPTATION = 1000
 const SKY_CEILING = 0.88
+// how sharp the tone curve's shoulder is - lower is longer and softer. At
+// 1.5 the midday sky is shown much as before, the horizon exactly so (the
+// exposure is set from it), and the zenith alike.
+const SKY_SHOULDER = 1.5
+
+// light, exposed, to the luminance shown - and back
+function tone(light) {
+  return (SKY_CEILING * light) / (1 + light ** SKY_SHOULDER) ** (1 / SKY_SHOULDER)
+}
+function untone(shown) {
+  const r = shown / SKY_CEILING
+  return r / (1 - r ** SKY_SHOULDER) ** (1 / SKY_SHOULDER)
+}
 
 // the sun's angular radius, degrees, and the width of its soft edge - and
 // how bright it is shown, as luminance, above anything in the sky
@@ -87,6 +104,7 @@ const fragmentShader = /* glsl */ `
   const float ELEVATIONS = ${SKY_ELEVATIONS}.0;
   const float G = ${MIE_G};
   const float CEILING = ${SKY_CEILING};
+  const float SHOULDER = ${SKY_SHOULDER.toFixed(3)};
   const float SUN_INNER = ${Math.cos(((SUN_RADIUS - SUN_EDGE) * Math.PI) / 180)};
   const float SUN_OUTER = ${Math.cos(((SUN_RADIUS + SUN_EDGE) * Math.PI) / 180)};
 
@@ -106,12 +124,16 @@ const fragmentShader = /* glsl */ `
   }
 
   // see the exposure comment at the top of SkyDome.js
+  float tone(float light) {
+    return CEILING * light / pow(1.0 + pow(light, SHOULDER), 1.0 / SHOULDER);
+  }
+
   vec3 toDisplay(vec3 light) {
     float strongest = max(light.r, max(light.g, light.b));
     if (strongest <= 0.0) return vec3(0.0);
 
-    vec3 color = CEILING * light * (1.0 - exp(-strongest)) / strongest;
-    float target = CEILING * (1.0 - exp(-dot(light, LUMINANCE)));
+    vec3 color = light * tone(strongest) / strongest;
+    float target = tone(dot(light, LUMINANCE));
     float shown = dot(color, LUMINANCE);
     return mix(color, vec3(CEILING), max(0.0, (target - shown) / (CEILING - shown)));
   }
@@ -153,8 +175,8 @@ export function toDisplay(light) {
   const strongest = Math.max(...light)
   if (strongest <= 0) return [0, 0, 0]
 
-  const color = light.map((l) => (SKY_CEILING * l * (1 - Math.exp(-strongest))) / strongest)
-  const target = SKY_CEILING * (1 - Math.exp(-luminance(light)))
+  const color = light.map((l) => (l * tone(strongest)) / strongest)
+  const target = tone(luminance(light))
   const shown = luminance(color)
   const whiten = Math.max(0, (target - shown) / (SKY_CEILING - shown))
   return color.map((c) => c + (SKY_CEILING - c) * whiten)
@@ -269,9 +291,11 @@ export default class SkyDome extends Mesh {
    * @param sunDirection  towards the sun, in the scene's frame (z up)
    * @param sunElevation  degrees
    * @param height        the viewer's, meters above sea level
+   * @param hazeScale     how much haze there is - see setHazeScale in
+   *                      atmosphere.js
    */
-  update(sunDirection, sunElevation, height) {
-    const request = { sunDirection: sunDirection.toArray(), sunElevation, height }
+  update(sunDirection, sunElevation, height, hazeScale = 1) {
+    const request = { sunDirection: sunDirection.toArray(), sunElevation, height, hazeScale }
     if (this.busy) {
       this.waiting = request
     } else {
@@ -285,7 +309,7 @@ export default class SkyDome extends Mesh {
       // the exposure that gives the horizon REFERENCE_HORIZON's brightness,
       // with the sun at REFERENCE_SUN_ELEVATION, and the daylight then
       const horizon = this.radianceAt(sky, REFERENCE_SUN_ELEVATION, SKY_ELEVATIONS / 2, SKY_AZIMUTHS / 2)
-      this.referenceExposure = -Math.log(1 - luminance(REFERENCE_HORIZON.toArray()) / SKY_CEILING) / luminance(horizon)
+      this.referenceExposure = untone(luminance(REFERENCE_HORIZON.toArray())) / luminance(horizon)
       this.referenceDaylight = sky.daylight
       this.referenceGroundLight = sky.groundLight
       this.referenceSkyLight = sky.skyLight

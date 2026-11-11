@@ -42,8 +42,8 @@ import { MeshoptDecoder } from "./externals/meshopt_decoder.module"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
-import { sunPosition, twilight } from "./sky/sun.js"
-import { sunTransmittance, terrainHaze, luminance, GROUND_ALBEDO, FOG_SHAPE } from "./sky/atmosphere.js"
+import { minutesFromSunset, sunPosition, twilight } from "./sky/sun.js"
+import { sunTransmittance, terrainHaze, luminance, setHazeScale, GROUND_ALBEDO, FOG_SHAPE } from "./sky/atmosphere.js"
 import SkyDome from "./sky/SkyDome.js"
 import { updateHorizonFog } from "./sky/horizonFog.js"
 import { updateLandingLight } from "./graphics/landingLight.js"
@@ -529,13 +529,37 @@ const sunlightFilter = new Color()
 // and has the sky, and the fog, take on the colours of that time of day.
 // The sun moves a quarter of a degree a minute, so this runs once a second
 // rather than every frame.
+// The haze thins out over the last SUNSET_HAZE_HOURS before sunset, to
+// SUNSET_HAZE of its daytime amount, and stays that way through the
+// evening, for up to SUNSET_HAZE_AFTER hours after: the air often clears as
+// the day cools, and with all of the day's haze the glow round a low sun
+// was larger than it is seen.
+const SUNSET_HAZE = 0.6
+const SUNSET_HAZE_HOURS = 2
+const SUNSET_HAZE_AFTER = 6
+
+// how much of the day's haze there is at the moment given - see SUNSET_HAZE
+function hazeScaleAt(date, lat, lon) {
+  const minutes = minutesFromSunset(date, lat, lon, 60 * SUNSET_HAZE_HOURS, 60 * SUNSET_HAZE_AFTER)
+  if (minutes === null) return 1
+  const along = MathUtils.clamp(1 + minutes / (60 * SUNSET_HAZE_HOURS), 0, 1)
+  // in steps of a hundredth, as the sky's tables are worked out again for each new one
+  return Math.round(100 * (1 - (1 - SUNSET_HAZE) * along)) / 100
+}
+
 function updateSun() {
   const east = airplaneState.epos * SimulationConstants.FEET_TO_METERS
   const north = airplaneState.npos * SimulationConstants.FEET_TO_METERS
   const altitude = airplaneState.alt * SimulationConstants.FEET_TO_METERS
 
   const [lon, lat] = proj4(UTM33N_PROJECTION).inverse([east, north])
-  const sun = sunPosition(new Date(Date.now() + timeOffset), lat, lon)
+  const date = new Date(Date.now() + timeOffset)
+  const sun = sunPosition(date, lat, lon)
+
+  // see SUNSET_HAZE - for the sunlight and the terrain's haze here, and the
+  // sky's, worked out in its worker
+  const hazeScale = hazeScaleAt(date, lat, lon)
+  setHazeScale(hazeScale)
 
   // the azimuth is from true north, while the scene's y axis points to
   // grid north - a few degrees apart away from the zone's central meridian
@@ -556,7 +580,7 @@ function updateSun() {
   // a shadow is only as dark as the sunlight it holds back is strong
   groundShadow.material.opacity = GROUND_SHADOW_OPACITY * Math.min(1, sunlightFilter.g)
 
-  sky.update(sunDirection, sun.elevation, altitude)
+  sky.update(sunDirection, sun.elevation, altitude, hazeScale)
 
   // the air between the aircraft and the terrain it sees in the distance -
   // thinner the higher it flies, above most of the haze
@@ -1472,8 +1496,8 @@ function endReplay() {
 // how far back the replay is, and the keys for it
 const replayBanner = document.createElement("div")
 replayBanner.style.cssText =
-  "display: none; position: fixed; top: 16px; left: 50%; transform: translateX(-50%); padding: 6px 14px; " +
-  "border-radius: 6px; background: rgba(0, 0, 0, 0.55); color: #ddd; font: 16px Verdana, sans-serif; " +
+  "display: none; position: fixed; top: 6px; left: 50%; transform: translateX(-50%); padding: 2px 10px; " +
+  "border-radius: 5px; background: rgba(0, 0, 0, 0.55); color: #ddd; font: 13px Verdana, sans-serif; " +
   "pointer-events: none; white-space: nowrap; z-index: 10"
 document.body.append(replayBanner)
 

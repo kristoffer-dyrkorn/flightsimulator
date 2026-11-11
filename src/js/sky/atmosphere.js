@@ -38,6 +38,8 @@ const HAZE = 5
 const MIE_SCATTERING = 3.996e-6 * HAZE
 const MIE_EXTINCTION = 4.4e-6 * HAZE
 const MIE_HEIGHT = 1200
+// how much of that haze there is now, 0..1 - see setHazeScale
+let hazeScale = 1
 const OZONE = [0.65e-6, 1.881e-6, 0.085e-6]
 const OZONE_PEAK = 25000
 const OZONE_HALF_WIDTH = 15000
@@ -49,12 +51,24 @@ export const GROUND_ALBEDO = 0.1
 // how strongly haze scatters forwards, 0..1 - the bright glow round the sun
 export const MIE_G = 0.8
 
+/**
+ * Sets how much of the haze there is, as a share of HAZE's - 1 normally, and
+ * less towards sunset (see index.js). The tables below have the haze in
+ * them, so they are worked out again on the next use when it changes.
+ */
+export function setHazeScale(scale) {
+  if (scale === hazeScale) return
+  hazeScale = scale
+  depthTable = null
+  scatterTable = null
+}
+
 // total extinction per meter at height h, per colour, into out
 function extinction(h, out) {
   const rayleigh = Math.exp(-h / RAYLEIGH_HEIGHT)
   const mie = Math.exp(-h / MIE_HEIGHT)
   const ozone = Math.max(0, 1 - Math.abs(h - OZONE_PEAK) / OZONE_HALF_WIDTH)
-  for (let c = 0; c < 3; c++) out[c] = RAYLEIGH[c] * rayleigh + MIE_EXTINCTION * mie + OZONE[c] * ozone
+  for (let c = 0; c < 3; c++) out[c] = RAYLEIGH[c] * rayleigh + MIE_EXTINCTION * hazeScale * mie + OZONE[c] * ozone
 }
 
 /**
@@ -268,7 +282,7 @@ function buildScatterTable() {
           const mieDensity = Math.exp(-h / MIE_HEIGHT)
 
           for (let c = 0; c < 3; c++) {
-            const scattering = RAYLEIGH[c] * rayleighDensity + MIE_SCATTERING * mieDensity
+            const scattering = RAYLEIGH[c] * rayleighDensity + MIE_SCATTERING * hazeScale * mieDensity
             const transmittance = Math.exp(-(depth[c] + 0.5 * sigma[c] * dt))
             once[c] += (scattering * transmittance * Math.exp(-toSun[c]) * dt) / (4 * Math.PI)
             again[c] += scattering * transmittance * dt
@@ -421,9 +435,9 @@ export function computeSky(sunElevation, height) {
           const toViewer = Math.exp(-(viewDepth[c] + 0.5 * sigma[c] * dt))
           const transmittance = toViewer * Math.exp(-toSun[c])
           rayleigh[index + c] += RAYLEIGH[c] * rayleighDensity * transmittance * dt
-          mie[index + c] += MIE_SCATTERING * mieDensity * transmittance * dt
+          mie[index + c] += MIE_SCATTERING * hazeScale * mieDensity * transmittance * dt
           isotropic[index + c] +=
-            (RAYLEIGH[c] * rayleighDensity + MIE_SCATTERING * mieDensity) * scattered[c] * toViewer * dt
+            (RAYLEIGH[c] * rayleighDensity + MIE_SCATTERING * hazeScale * mieDensity) * scattered[c] * toViewer * dt
           viewDepth[c] += sigma[c] * dt
         }
       }

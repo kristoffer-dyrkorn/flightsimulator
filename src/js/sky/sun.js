@@ -130,3 +130,27 @@ export function twilight(date, lat, lon) {
   }
   return { dawn, dusk }
 }
+
+/**
+ * How far the moment given is from sunset, in minutes - negative before it,
+ * positive after - as long as it is within the minutes given either side of
+ * it; otherwise null, as in the morning, in the middle of the day or night,
+ * and on days the sun doesn't set or rise. Sunset is when the sun's centre
+ * goes below the horizon, as seen.
+ *
+ * @param date    the moment, as a Date
+ * @param lat     latitude, degrees north
+ * @param lon     longitude, degrees east
+ * @param before  how many minutes before sunset to look
+ * @param after   and after
+ */
+export function minutesFromSunset(date, lat, lon, before, after) {
+  const MINUTE = 60000
+  const up = (minute) => sunPosition(new Date(date.getTime() + minute * MINUTE), lat, lon).elevation >= 0
+  if (up(0)) {
+    for (let minute = 1; minute <= before; minute++) if (!up(minute)) return -minute
+  } else {
+    for (let minute = 1; minute <= after; minute++) if (up(-minute)) return minute
+  }
+  return null
+}

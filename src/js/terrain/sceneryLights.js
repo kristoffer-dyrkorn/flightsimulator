@@ -59,6 +59,11 @@ const VARIATION = 0.35
 const BRIGHTNESS = 1.6
 const FULL_STRENGTH_RANGE = 1500 // m
 const HAZE_SHARE = 0.4
+// On top of that they fade evenly with the distance, down to FADE_TO of
+// their strength at FADE_DISTANCE and beyond - far off, a town's lights
+// stood out more than they do
+const FADE_DISTANCE = 50000 // m
+const FADE_TO = 1 / 3
 
 // They come on as the daylight goes: off with the sky's exposure below
 // ON_FROM_ADAPTATION, the sun some 4 degrees up, fully on from
@@ -117,7 +122,10 @@ const vertexShader = /* glsl */ `
     float offAxis = -mvPosition.z / length(mvPosition.xyz);
     float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});
 
-    float energy = brightness * strength * falloff * haze * edgeGain;
+    // see FADE_DISTANCE
+    float fade = mix(1.0, ${FADE_TO.toFixed(4)}, min(distance / ${FADE_DISTANCE.toFixed(1)}, 1.0));
+
+    float energy = brightness * strength * falloff * haze * edgeGain * fade;
     // never brighter than its own colour, or it clips to white on screen
     vColor = color * min(energy, 1.0);
 

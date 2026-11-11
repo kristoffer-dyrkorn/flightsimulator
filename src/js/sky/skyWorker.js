@@ -1,11 +1,12 @@
-import { computeSky, daylight, groundIrradiance, skyIrradiance } from "./atmosphere.js"
+import { computeSky, daylight, groundIrradiance, setHazeScale, skyIrradiance } from "./atmosphere.js"
 
 /**
  * Works out the sky off the main thread - see SkyDome. It takes several
  * milliseconds, which on the main thread would hold up the frame it fell in,
  * once every update, as a small stutter.
  *
- * Asked { sunElevation, height, ... }, it answers with the same, plus:
+ * Asked { sunElevation, height, hazeScale, ... } - hazeScale is optional, 1
+ * if left out (see setHazeScale) - it answers with the same, plus:
  *
  * - the sky seen from that height (rayleigh, mie, isotropic - see computeSky)
  * - daylight, the light falling on level ground there, as luminance (see
@@ -24,7 +25,8 @@ import { computeSky, daylight, groundIrradiance, skyIrradiance } from "./atmosph
  * request.
  */
 self.onmessage = ({ data }) => {
-  const { sunElevation, height } = data
+  const { sunElevation, height, hazeScale = 1 } = data
+  setHazeScale(hazeScale)
   const sky = computeSky(sunElevation, height)
 
   // copies, since computeSky reuses its arrays - handed over, not copied again
