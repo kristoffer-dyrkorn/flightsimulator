@@ -36,40 +36,85 @@ const BUILDING_COLOR = new Color(0.17, 0.17, 0.17)
 const AMBIENT = 0.5
 const DIRECT = 0.75
 
+// The roofs take the colour of the terrain's photo where they are - the
+// photo shows the roofs themselves, from above - tinted by the daylight as
+// the terrain is. Until the photo is in, they are grey like the walls.
+//
+// The photo is sampled up to ROOF_INSET in from a roof's edge, towards the
+// building's centre - so a small roof takes the colour of its middle - as
+// at the edge the outline and the photo don't quite meet, and the roof
+// took on the grass or the road beside it.
+const ROOF_INSET = 2 // m
+// And the photo's own light is in it already, so a roof is only shaded by
+// the sun this much of what a wall is.
+const ROOF_SHADING = 0.3
+
 export default class Buildings {
-  constructor(scene) {
+  /**
+   * @param terrainMap  the terrain texture of a tile, by its name - or null
+   *                    while it isn't in
+   */
+  constructor(scene, terrainMap) {
     this.scene = scene
+    this.terrainMap = terrainMap
     // tileName -> its mesh, while the tile is loaded
     this.meshes = new Map()
 
     this.sunDirection = { value: new Vector3(0, 0, 1) }
-    this.material = new MeshBasicMaterial()
+  }
+
+  // A material for a tile's buildings, with the tile's photo for the roofs -
+  // one each, as the photos differ, but all the same program
+  material() {
+    const material = new MeshBasicMaterial()
     // tinted by the daylight, as the terrain is - see Tile
-    this.material.color = Tile.light
-    useHorizonFog(this.material)
-    const previous = this.material.onBeforeCompile
-    this.material.onBeforeCompile = (shader, renderer) => {
-      previous?.call(this.material, shader, renderer)
+    material.color = Tile.light
+    useHorizonFog(material)
+    const roofs = { terrainMap: { value: null }, hasTerrainMap: { value: false } }
+    material.userData.roofs = roofs
+    const previous = material.onBeforeCompile
+    material.onBeforeCompile = (shader, renderer) => {
+      previous?.call(material, shader, renderer)
       shader.uniforms.sunDirection = this.sunDirection
+      Object.assign(shader.uniforms, roofs)
       shader.vertexShader = shader.vertexShader
-        .replace("#include <common>", "#include <common>\nuniform vec3 sunDirection;\nvarying float vShade;")
+        .replace(
+          "#include <common>",
+          "#include <common>\nuniform vec3 sunDirection;\nattribute vec2 roofCenter;\nvarying float vShade;\nvarying float vRoof;\nvarying vec2 vGround;\nvarying vec2 vRoofCenter;",
+        )
         .replace(
           "#include <begin_vertex>",
           /* glsl */ `#include <begin_vertex>
           // the mesh is never turned, so its normals are the scene's - and
           // the sun gives no direct light once it is down
           float sunUp = smoothstep(-0.02, 0.05, sunDirection.z);
-          vShade = ${AMBIENT.toFixed(2)} + ${DIRECT.toFixed(2)} * sunUp * max(dot(normal, sunDirection), 0.0);`,
+          vShade = ${AMBIENT.toFixed(2)} + ${DIRECT.toFixed(2)} * sunUp * max(dot(normal, sunDirection), 0.0);
+          vRoof = step(0.5, normal.z);
+          vGround = position.xy;
+          vRoofCenter = roofCenter;`,
         )
       shader.fragmentShader = shader.fragmentShader
-        .replace("#include <common>", "#include <common>\nvarying float vShade;")
+        .replace(
+          "#include <common>",
+          "#include <common>\nuniform sampler2D terrainMap;\nuniform bool hasTerrainMap;\nvarying float vShade;\nvarying float vRoof;\nvarying vec2 vGround;\nvarying vec2 vRoofCenter;",
+        )
         .replace(
           "vec4 diffuseColor = vec4( diffuse, opacity );",
-          `vec4 diffuseColor = vec4( diffuse * vec3(${BUILDING_COLOR.toArray().map((c) => c.toFixed(3)).join(", ")}) * vShade, opacity );`,
+          /* glsl */ `vec3 wall = vec3(${BUILDING_COLOR.toArray().map((c) => c.toFixed(3)).join(", ")}) * vShade;
+          // see ROOF_INSET - and where the terrain's photo has that point: as
+          // the terrain tiles have it, east across and north up, over the tile
+          vec2 inward = vRoofCenter - vGround;
+          vec2 sampled = vGround + inward * min(1.0, ${ROOF_INSET.toFixed(1)} / max(length(inward), 0.001));
+          vec2 terrainUv = vec2(sampled.x / ${TILE_EXTENTS.toFixed(1)}, 1.0 - sampled.y / ${TILE_EXTENTS.toFixed(1)});
+          // see ROOF_SHADING - the shade as a share of the most a wall gets
+          float roofShade = mix(1.0, vShade / ${(AMBIENT + DIRECT).toFixed(2)}, ${ROOF_SHADING.toFixed(2)});
+          vec3 roof = hasTerrainMap ? texture2D(terrainMap, terrainUv).rgb * roofShade : wall;
+          vec4 diffuseColor = vec4( diffuse * mix(wall, roof, vRoof), opacity );`,
         )
     }
-    const key = this.material.customProgramCacheKey
-    this.material.customProgramCacheKey = () => key.call(this.material) + "+buildings"
+    const key = material.customProgramCacheKey
+    material.customProgramCacheKey = () => key.call(material) + "+buildings"
+    return material
   }
 
   /**
@@ -86,6 +131,7 @@ export default class Buildings {
     if (!mesh) return
     this.scene.remove(mesh)
     mesh.geometry.dispose()
+    mesh.material.dispose()
     this.meshes.delete(tileName)
   }
 
@@ -94,17 +140,18 @@ export default class Buildings {
    *
    * @param tileName  "{lowerLeftEasting}-{lowerLeftNorthing}"
    */
-  add(tileName, { positions, normals, indices, center, radius }) {
+  add(tileName, { positions, normals, centers, indices, center, radius }) {
     if (this.meshes.has(tileName)) return
     const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
 
     const geometry = new BufferGeometry()
     geometry.setAttribute("position", new BufferAttribute(positions, 3))
     geometry.setAttribute("normal", new BufferAttribute(normals, 4, true))
+    geometry.setAttribute("roofCenter", new BufferAttribute(centers, 2))
     geometry.setIndex(new BufferAttribute(indices, 1))
     geometry.boundingSphere = new Sphere(new Vector3(...center), radius)
 
-    const mesh = new Mesh(geometry, this.material)
+    const mesh = new Mesh(geometry, this.material())
     mesh.name = `buildings ${tileName}`
     mesh.position.set(x, y, 0)
     mesh.updateMatrix()
@@ -124,7 +171,12 @@ export default class Buildings {
    */
   update(camera, lightsLevel) {
     const daylight = lightsLevel < SHOWN_UNTIL_LIGHTS
-    for (const mesh of this.meshes.values()) {
+    for (const [tileName, mesh] of this.meshes) {
+      // the roofs' photo - the tile's, once it is in
+      const roofs = mesh.material.userData.roofs
+      roofs.terrainMap.value = this.terrainMap(tileName)
+      roofs.hasTerrainMap.value = roofs.terrainMap.value !== null
+
       const [x, y] = mesh.userData.corner
       const dx = Math.max(x - camera.position.x, 0, camera.position.x - (x + TILE_EXTENTS))
       const dy = Math.max(y - camera.position.y, 0, camera.position.y - (y + TILE_EXTENTS))

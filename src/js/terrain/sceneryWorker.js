@@ -5,7 +5,10 @@ import { ShapeUtils, Vector2 } from "three"
  * { tileName, url }, it fetches the file and answers { tileName, found,
  * lights, buildings }: whether there was a file, its light MultiPoints as
  * they are (see sceneryLights.js), and its buildings as one mesh's arrays -
- * { positions, normals, indices, center, radius } - or null if it has none.
+ * { positions, normals, centers, indices, center, radius } - or null if it
+ * has none. centers is each vertex's building's centre, east and north in
+ * whole meters - for where the roofs sample the terrain's photo, see
+ * buildings.js.
  *
  * A missing file is no scenery, not an error: a 404 or 403 (what S3
  * answers for a file that isn't there), or anything that isn't JSON (what a
@@ -41,10 +44,15 @@ async function read(url) {
 function buildingMesh(features) {
   const positions = []
   const normals = []
+  const centers = []
+  // the building's centre, for the vertices made now
+  let centerX = 0
+  let centerY = 0
   const indices = []
   const vertex = (x, y, z, nx, ny, nz) => {
     positions.push(x, y, z)
     normals.push(Math.round(nx * 127), Math.round(ny * 127), Math.round(nz * 127), 0)
+    centers.push(centerX, centerY)
     return positions.length / 3 - 1
   }
 
@@ -62,6 +70,9 @@ function buildingMesh(features) {
       })
       if (rings[0].length < 4) continue
       const base = rings[0][0][2]
+      const corners = rings[0].slice(0, -1)
+      centerX = Math.round(corners.reduce((sum, [x]) => sum + x, 0) / corners.length)
+      centerY = Math.round(corners.reduce((sum, [, y]) => sum + y, 0) / corners.length)
       const top = base + height
 
       for (const ring of rings) {
@@ -111,6 +122,7 @@ function buildingMesh(features) {
   return {
     positions: new Float32Array(positions),
     normals: new Int8Array(normals),
+    centers: new Int16Array(centers),
     indices: positions.length / 3 > 65535 ? new Uint32Array(indices) : new Uint16Array(indices),
     center: min.map((m, c) => (m + max[c]) / 2),
     radius: Math.hypot(max[0] - min[0], max[1] - min[1], max[2] - min[2]) / 2,
@@ -126,6 +138,8 @@ self.onmessage = async ({ data: { tileName, url } }) => {
 
   const lights = features.filter((feature) => feature.geometry?.type === "MultiPoint")
   const buildings = buildingMesh(features.filter((feature) => /Polygon$/.test(feature.geometry?.type ?? "")))
-  const transfer = buildings ? [buildings.positions.buffer, buildings.normals.buffer, buildings.indices.buffer] : []
+  const transfer = buildings
+    ? [buildings.positions.buffer, buildings.normals.buffer, buildings.centers.buffer, buildings.indices.buffer]
+    : []
   self.postMessage({ tileName, found: true, lights, buildings }, transfer)
 }

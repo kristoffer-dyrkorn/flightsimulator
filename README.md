@@ -71,7 +71,7 @@ Features after July 2025 have been made using AI.
 - Added glide scope indicator when in landing mode and lined up with a runway
 - Added modelling of fuel consumption and fuel weight
 - Added more realistic runway rendering, including markings and numbers
-- Added 3D buildings in daylight and building and street lights at dark, using data from from Overture
+- Added 3D buildings in daylight and building and street lights in the dark, using data from from Overture
 
 #### October 2026:
 

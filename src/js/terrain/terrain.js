@@ -30,7 +30,7 @@ export default class Terrain {
 
     // buildings, where there are any, shown in daylight while their tiles
     // are loaded - see buildings.js
-    this.buildings = new Buildings(scene)
+    this.buildings = new Buildings(scene, (tileName) => this.tiles.get(tileName)?.tileMesh.material.map ?? null)
 
     // the scenery files both come from - see scenery.js
     this.scenery = new Scenery(this.sceneryLights, this.buildings)
