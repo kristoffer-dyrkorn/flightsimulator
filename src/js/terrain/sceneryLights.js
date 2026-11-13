@@ -1,24 +1,14 @@
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, ShaderMaterial } from "three"
-import { FOG_SHAPE } from "../sky/atmosphere.js"
-import { SERVER } from "./tile.js"
+import { fogDepthGLSL } from "../sky/atmosphere.js"
 import { lightStreaks, streakFragmentPars, streakVertex, streakVertexPars } from "./lightStreaks.js"
 
 /*
  * Lights on the ground at night - from buildings, and street lights along
- * the larger roads - one optional file per terrain tile, src/scenery/
- * {tileName}.json, named like the tile's own GLB/KTX2. GeoJSON MultiPoints:
- * tile-local easting and northing, and the light's height above sea level.
- * A building's light is grouped by the building's category and size, a
- * street light by the road's class.
- *
- * Every terrain tile's file is asked for when the tile loads - most of the
- * country has none, and a missing one is no lights, not an error: a 404 or
- * 403 (what S3 answers for a file that isn't there), or anything that isn't
- * JSON (what a development server answers with its index page). Each file
- * is asked for once while its tile stays loaded. That there is none is
- * remembered for good; a tile's lights are let go with the tile, and asked
- * for again - usually from the browser's cache - if it loads again, so a
- * long flight across the country doesn't pile them up in memory.
+ * the larger roads - from the tiles' scenery files (see scenery.js): their
+ * MultiPoints, tile-local easting and northing, and the light's height
+ * above sea level, in whole meters. A building's light is grouped by the
+ * building's category and size, { c, s } - see CATEGORY_NAMES and
+ * SIZE_NAMES - and the street lights are { c: "s" }.
  *
  * Each tile's lights are one point cloud, placed at the tile's corner as the
  * terrain is, so their own coordinates stay small, shown while the tile is
@@ -41,6 +31,10 @@ const COLOURS = {
   street: new Color(1.0, 0.6, 0.22),
 }
 const SIZES = { small: 0.6, medium: 1.0, large: 1.6 }
+// the short names the scenery files have for them
+const CATEGORY_NAMES = { r: "residential", c: "cabin", f: "farm", m: "commercial", i: "industrial", p: "public", o: "other" }
+const SIZE_NAMES = { s: "small", m: "medium", l: "large" }
+const STREET = "s"
 const STREET_STRENGTH = 0.9
 
 // Not every building has its lights on: this share of them, in each
@@ -116,7 +110,7 @@ const vertexShader = /* glsl */ `
     float distance = length(eye - position);
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(strength);
     float falloff = min(1.0, range / distance);
-    float haze = exp(-${HAZE_SHARE.toFixed(3)} * pow(hazeDensity * distance, ${FOG_SHAPE.toFixed(2)}));
+    float haze = exp(-${HAZE_SHARE.toFixed(3)} * ${fogDepthGLSL("hazeDensity", "distance")});
     vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
     // see EDGE_GAIN_MAX
     float offAxis = -mvPosition.z / length(mvPosition.xyz);
@@ -157,9 +151,6 @@ export default class SceneryLights {
     this.scene = scene
     // tileName -> the tile's point cloud, while it is loaded
     this.clouds = new Map()
-    // tileName -> its file's fetch, once started
-    this.fetches = new Map()
-    this.active = new Set()
     this.level = 0
     this.uniforms = {
       pixelRatio: { value: 1 },
@@ -168,39 +159,8 @@ export default class SceneryLights {
     }
   }
 
-  /**
-   * Shows a tile's lights, once its file is in - call when the tile loads.
-   *
-   * @param tileName  "{lowerLeftEasting}-{lowerLeftNorthing}"
-   */
-  load(tileName) {
-    this.active.add(tileName)
-    if (!this.fetches.has(tileName)) {
-      this.fetches.set(
-        tileName,
-        fetch(`${SERVER}/scenery/${tileName}.json`)
-          .then((response) => {
-            // see the comment at the top: anything but a JSON file is no lights
-            const json = (response.headers.get("content-type") ?? "").includes("json")
-            return response.ok && json ? response.json() : null
-          })
-          .then((geojson) => (Array.isArray(geojson?.features) && geojson.features.length > 0 ? geojson.features : null))
-          .catch(() => null),
-      )
-    }
-    this.fetches.get(tileName).then((features) => {
-      if (features && this.active.has(tileName) && !this.clouds.has(tileName)) this.add(tileName, features)
-    })
-  }
-
-  /** Hides a tile's lights - call when the tile is unloaded. */
+  /** Takes a tile's lights away - call when the tile is unloaded. */
   unload(tileName) {
-    this.active.delete(tileName)
-    // forget its lights, keeping only that a tile has none - see the top
-    const fetched = this.fetches.get(tileName)
-    fetched?.then((features) => {
-      if (features && !this.active.has(tileName) && this.fetches.get(tileName) === fetched) this.fetches.delete(tileName)
-    })
     const cloud = this.clouds.get(tileName)
     if (!cloud) return
     this.scene.remove(cloud)
@@ -209,7 +169,13 @@ export default class SceneryLights {
     this.clouds.delete(tileName)
   }
 
+  /**
+   * Shows a tile's lights - the MultiPoints of its scenery file.
+   *
+   * @param tileName  "{lowerLeftEasting}-{lowerLeftNorthing}"
+   */
   add(tileName, features) {
+    if (this.clouds.has(tileName)) return
     const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
 
     const positions = []
@@ -218,10 +184,11 @@ export default class SceneryLights {
     for (const feature of features) {
       const p = feature.properties
       if (feature.geometry?.type !== "MultiPoint") continue
-      const street = p.kind === "street_light"
-      const colour = street ? COLOURS.street : (COLOURS[p.category] ?? COLOURS.other)
-      const base = street ? STREET_STRENGTH : (SIZES[p.size] ?? SIZES.medium)
-      const dark = street ? 0 : (DARK[p.category] ?? DARK_DEFAULT)
+      const street = p.c === STREET
+      const category = CATEGORY_NAMES[p.c] ?? "other"
+      const colour = street ? COLOURS.street : COLOURS[category]
+      const base = street ? STREET_STRENGTH : (SIZES[SIZE_NAMES[p.s]] ?? SIZES.medium)
+      const dark = street ? 0 : (DARK[category] ?? DARK_DEFAULT)
 
       for (const [px, py, pz] of feature.geometry.coordinates) {
         const h = hash(x + px, y + py)

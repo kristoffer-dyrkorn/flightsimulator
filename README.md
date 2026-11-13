@@ -71,6 +71,7 @@ Features after July 2025 have been made using AI.
 - Added glide scope indicator when in landing mode and lined up with a runway
 - Added modelling of fuel consumption and fuel weight
 - Added more realistic runway rendering, including markings and numbers
+- Added 3D buildings in daylight and building and street lights at dark, using data from from Overture
 
 #### October 2026:
 
@@ -160,6 +161,7 @@ Features after July 2025 have been made using AI.
 - Cockpit front panel is based on "F16C Block 50/52 + Cockpit" by [graphXDoses](https://sketchfab.com/3d-models/f16c-block-5052-cockpit-83fb3b74c97d46febda2813331de168d)
 - The application uses [three.js](https://threejs.org/) (MIT License), and [proj4js](https://github.com/proj4js/proj4js).
 - Road and building geometries are from [OpenStreetMap](https://openstreetmap.org/copyright) (ODbL License)
+- 3D building outlines and heights are from [Overture Maps Foundation](https://overturemaps.org) (ODbL License), which includes OpenStreetMap data
 - Runway numbers use the Open Runway Numbers font from [Open Runway Fonts](https://github.com/ryo-a/Open-Runway-Fonts) by ryo-a (CC0 / SIL Open Font License)
 
 ## License

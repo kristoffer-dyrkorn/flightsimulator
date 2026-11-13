@@ -1,5 +1,5 @@
 import { AdditiveBlending, BufferAttribute, BufferGeometry, Color, Points, ShaderMaterial } from "three"
-import { FOG_SHAPE } from "../sky/atmosphere.js"
+import { fogDepthGLSL } from "../sky/atmosphere.js"
 import { lightStreaks, streakFragmentPars, streakVertex, streakVertexPars } from "./lightStreaks.js"
 
 /*
@@ -162,7 +162,7 @@ const vertexShader = /* glsl */ `
     // and dimmed by the haze in between
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(intensity);
     float falloff = min(1.0, (range * range) / (distance * distance));
-    float haze = exp(-${HAZE_SHARE.toFixed(3)} * pow(hazeDensity * distance, ${FOG_SHAPE.toFixed(2)}));
+    float haze = exp(-${HAZE_SHARE.toFixed(3)} * ${fogDepthGLSL("hazeDensity", "distance")});
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
     float offAxis = -viewPosition.z / length(viewPosition.xyz);
     float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});
@@ -294,7 +294,7 @@ const slopeVertexShader = /* glsl */ `
     float directional = max(1.0 - smoothstep(${BEAM_HALF_WIDTH.toFixed(1)}, ${BEAM_EDGE.toFixed(1)}, angle), ${SLOPE_OMNI.toFixed(3)});
     float range = ${FULL_STRENGTH_RANGE.toFixed(1)} * sqrt(${SLOPE_INTENSITY.toFixed(2)});
     float falloff = min(1.0, (range * range) / (distance * distance));
-    float haze = exp(-${HAZE_SHARE.toFixed(3)} * pow(hazeDensity * distance, ${FOG_SHAPE.toFixed(2)}));
+    float haze = exp(-${HAZE_SHARE.toFixed(3)} * ${fogDepthGLSL("hazeDensity", "distance")});
     vec4 viewPosition = modelViewMatrix * vec4(position, 1.0);
     float offAxis = -viewPosition.z / length(viewPosition.xyz);
     float edgeGain = min(1.0 / max(offAxis * offAxis * offAxis, 0.001), ${EDGE_GAIN_MAX.toFixed(1)});

@@ -82,38 +82,23 @@ export function haze(height) {
   return sigma[1]
 }
 
-// Near the ground the air holds more haze than the sky's model above: damp
-// air, mostly, which haze particles take up and swell with. With the sky's
-// haze alone the terrain showed a good hundred kilometres off, as on the
-// clearest of arctic days; with this - and shaped by FOG_SHAPE - it fades
-// out at some 32 km near the ground and 45 km at 3000 ft, as on a typical
-// clear day, and further off the higher the aircraft flies, above most of
-// it. Only the terrain's haze - the sky would whiten with it, and is right
-// as it is.
-const GROUND_HAZE = 3.7e-5 // per meter, at sea level
-const GROUND_HAZE_HEIGHT = 1000 // m, in which it thins out to a third
-
-// How the haze over the terrain builds up with distance: as the optical
-// depth - density times distance - to this power. At 1 it is plain
-// exponential, the same share lost every kilometre, and from a few
-// thousand feet up the ground nearby looked as hazy as the hills far off
-// barely did. Above 1, the haze is thinner than that nearby and thicker far
-// off, the two the same where the optical depth is 1 - some 19 km off at
-// 3000 ft: the far view runs low through the dampest air, and fades into
-// the horizon as it does on a clear day.
-export const FOG_SHAPE = 1.6
+// How the haze over the terrain builds up with distance, d: an optical
+// depth of density * d * (1 + (d / FOG_FAR_DISTANCE)^2). Close by, that is
+// plain exponential haze - the same share of light lost every kilometre -
+// and further off it thickens, doubled at FOG_FAR_DISTANCE: the far view
+// runs low through the dampest air, and fades into the horizon as it does
+// on a clear day, some 40 km off near the ground and 45 km at 3000 ft,
+// instead of the hundred kilometres the sky's haze alone gives.
+export const FOG_FAR_DISTANCE = 30000 // m
 
 /**
- * How quickly the air between an aircraft at the given height, meters, and
- * the terrain it sees in the distance dims light, per meter, on average:
- * the sky's haze as thick as halfway down - a rough middle of the air on
- * the way - and the ground's haze averaged down to sea level.
+ * The optical depth of the haze over the terrain, in GLSL - see
+ * FOG_FAR_DISTANCE - for the density and distance given as GLSL expressions.
  */
-export function terrainHaze(altitude) {
-  const a = Math.max(altitude, 1)
-  const ground = ((GROUND_HAZE * GROUND_HAZE_HEIGHT) / a) * (1 - Math.exp(-a / GROUND_HAZE_HEIGHT))
-  return haze(altitude / 2) + ground
+export function fogDepthGLSL(density, distance) {
+  return `(${density}) * (${distance}) * (1.0 + pow((${distance}) / ${FOG_FAR_DISTANCE.toFixed(1)}, 2.0))`
 }
+
 
 /**
  * The optical depth, per colour, from a point at the given height out to

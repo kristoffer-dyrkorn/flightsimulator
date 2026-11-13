@@ -3,6 +3,8 @@ import { Ray, Vector3 } from "three"
 import { GenerateMeshBVHWorker } from "../externals/workers/GenerateMeshBVHWorker.js"
 import RunwayRegistry from "./runways.js"
 import SceneryLights from "./sceneryLights.js"
+import Buildings from "./buildings.js"
+import Scenery from "./scenery.js"
 
 const TILE_EXTENTS = 50 * 255
 
@@ -25,6 +27,13 @@ export default class Terrain {
     // lights from buildings and roads at night, shown while their tiles
     // are loaded - see sceneryLights.js
     this.sceneryLights = new SceneryLights(scene)
+
+    // buildings, where there are any, shown in daylight while their tiles
+    // are loaded - see buildings.js
+    this.buildings = new Buildings(scene)
+
+    // the scenery files both come from - see scenery.js
+    this.scenery = new Scenery(this.sceneryLights, this.buildings)
 
     // queue for fetching tiles, to rate limit image fetching and decoding
     this.fetchQueue = []

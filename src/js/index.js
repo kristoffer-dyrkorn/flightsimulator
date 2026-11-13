@@ -43,7 +43,7 @@ import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
 import HUDObject from "./graphics/HUDObject.js"
 import { minutesFromSunset, sunPosition, twilight } from "./sky/sun.js"
-import { sunTransmittance, terrainHaze, luminance, setHazeScale, GROUND_ALBEDO, FOG_SHAPE } from "./sky/atmosphere.js"
+import { sunTransmittance, haze, luminance, setHazeScale, GROUND_ALBEDO, fogDepthGLSL } from "./sky/atmosphere.js"
 import SkyDome from "./sky/SkyDome.js"
 import { updateHorizonFog } from "./sky/horizonFog.js"
 import { updateLandingLight } from "./graphics/landingLight.js"
@@ -190,7 +190,7 @@ const scene = new Scene()
 // the horizon's averaged all round, for the aircraft.
 const sky = new SkyDome()
 scene.add(sky)
-scene.fog = new FogExp2(sky.fogColor, terrainHaze(0))
+scene.fog = new FogExp2(sky.fogColor, haze(0))
 // the sky's own colour, kept up to date by it as it changes
 scene.fog.color = sky.fogColor
 
@@ -200,10 +200,11 @@ scene.fog.color = sky.fogColor
 // material: density is then the share of light lost per meter. As FogExp2
 // was, it hid the terrain thirty kilometres off almost completely, leaving
 // distant mountains a flat white; through a clear day's air a quarter of
-// their own colour still shows at fifty. Shaped by FOG_SHAPE - see there.
+// their own colour still shows at fifty. Thickening further off - see
+// FOG_FAR_DISTANCE.
 ShaderChunk.fog_fragment = ShaderChunk.fog_fragment.replace(
   "fogDensity * fogDensity * vFogDepth * vFogDepth",
-  `pow(fogDensity * vFogDepth, ${FOG_SHAPE.toFixed(2)})`,
+  fogDepthGLSL("fogDensity", "vFogDepth"),
 )
 
 // the aircraft lives in its own scene, which is shifted so that the
@@ -475,6 +476,8 @@ startDirection -= startPoint[3]
 compassOffset = startPoint[3]
 
 const terrain = new Terrain(scene, MINX, MINY, MAXX, MAXY, renderer)
+// the buildings are shaded by the sun the sky shows
+terrain.buildings.setSunDirection(sunDirection)
 
 // set up physics simulation, flying in a surface wind read from the forecast at
 // the corners of the terrain tiles
@@ -582,9 +585,10 @@ function updateSun() {
 
   sky.update(sunDirection, sun.elevation, altitude, hazeScale)
 
-  // the air between the aircraft and the terrain it sees in the distance -
-  // thinner the higher it flies, above most of the haze
-  scene.fog.density = terrainHaze(altitude)
+  // as thick as the air halfway down from the aircraft to sea level, a
+  // rough middle of the air between it and the terrain it sees in the
+  // distance - thinner the higher it flies, above most of the haze
+  scene.fog.density = haze(altitude / 2)
 
   return sun
 }
@@ -1250,6 +1254,7 @@ function drawView(view, frameTime) {
   }
 
   terrain.update(camera, showWireFrame)
+  terrain.buildings.update(cameras[currentCamera], terrain.sceneryLights.level)
   // see lightStreaks.js
   renderer.getDrawingBufferSize(drawingBufferSize)
   // no streaks from the cockpit
