@@ -58,6 +58,15 @@ const HEADING_SCALE = 10
 const SCALE_REACH = 150
 const SCALE_FONT = "1.5em Verdana"
 
+// The glow round the symbology, as a phosphor's: its colour (#10ee30, as the
+// canvas's own colours are taken - see hudTexture in index.js), how strong it is at the symbols' edge, 0 to 1, and how far it
+// reaches - a Gaussian's sigma, in canvas pixels. Laid under the symbols when
+// the HUD's canvas is drawn on screen (see hudMaterial in index.js), not with
+// the canvas's own shadowBlur: that blurred every line and every piece of
+// text on its own, and the canvas, redrawn every frame, cost a couple of
+// milliseconds of GPU time more for it.
+export const HUD_GLOW = { color: [0x10 / 255, 0xee / 255, 0x30 / 255], strength: 1, sigma: 1 }
+
 // The vertical velocity scale shown with the gear down (VV, in the real
 // aircraft's terms - see drawVerticalVelocityScale): from VV_MAX ft/min
 // climbing to VV_MIN sinking, a tick every VV_STEP and a longer, labelled
@@ -104,8 +113,7 @@ export default class HUDObject {
 
     this.ctx = this.canvas.getContext("2d")
     this.ctx.lineWidth = 3
-    this.ctx.shadowBlur = 2
-    this.ctx.shadowColor = "#10ee30c0"
+    // no glow here - see HUD_GLOW
     this.ctx.font = "2.2em Verdana"
     this.ctx.textBaseline = "middle"
     this.ctx.fillStyle = "#10ee30"

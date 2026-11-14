@@ -130,12 +130,19 @@ export default class Tile {
             console.log(`BVH error for ${this.tileName}:`, error)
           })
 
-        Tile.terrainKtx2Loader.load(
+        Tile.ktx2Loader.load(
           `${SERVER}/texture-hires/${this.tileName}.ktx2`,
           (texture) => {
             console.log(`${this.tileName}.ktx2 loaded`)
 
             texture.anisotropy = 16
+            // Once it is on the GPU, the texture's data is let go on this
+            // side - a tile's is some 11 MB, and kept, it was most of the
+            // memory the simulator took. three.js reads it only to upload
+            // it, which it does once (it calls onUpdate when it has).
+            texture.onUpdate = () => {
+              for (const mipmap of texture.mipmaps) mipmap.data = null
+            }
             // On to the GPU now, as it arrives, rather than in the middle of
             // drawing the first frame the tile is in: uploaded there, the
             // frame then waited for the GPU to take it in - a freeze of
@@ -177,20 +184,28 @@ Tile.light = new Color(1, 1, 1)
 // the BVH jobs waiting for the worker, see load()
 Tile.bvhQueue = Promise.resolve()
 
+// The terrain's textures are ETC1S - ETC1 blocks inside - and three.js
+// transcodes ETC1S to BC7 wherever BC7 is supported, at 8 bits per pixel,
+// twice the 4 of ETC2 or BC1, which hold the same image as well (ETC2
+// exactly). A 4096 by 4096 tile with its mipmaps is 21 MB as BC7, uploaded to
+// the GPU in one go when it is first drawn - so for ETC1S, BC7 is put after
+// BC1, halving that and the GPU memory the tiles take. The aircraft's normal
+// maps are UASTC, which does gain from BC7 (or ASTC), and keep it. Done by
+// changing the order in the transcoder worker's own source, which three.js
+// builds the worker from: it has no setting for it, and two loaders, one
+// with BC7 and one without, each load the transcoder and keep workers of
+// their own - which three.js warns about.
+const basisWorker = KTX2Loader.BasisWorker.toString()
+const patchedWorker = basisWorker.replace(/(BC7_M5[^{}]*?priorityETC1S\s*:\s*)3\b/, (_, before) => `${before}4.5`)
+if (patchedWorker === basisWorker) {
+  console.warn("KTX2Loader: could not put BC7 after BC1 for the terrain - its textures take twice the memory")
+} else {
+  KTX2Loader.BasisWorker = { toString: () => patchedWorker }
+}
+
+// one loader for the terrain and the aircraft - see above
 Tile.ktx2Loader = new KTX2Loader()
 Tile.ktx2Loader.setTranscoderPath("js/externals/basis/")
 Tile.ktx2Loader.setCrossOrigin("anonymous")
-
-// The terrain's own loader. Its textures are ETC1S - ETC1 blocks inside -
-// and three.js transcodes ETC1S to BC7 wherever BC7 is supported, at 8 bits
-// per pixel, twice the 4 of ETC2 or BC1, which hold the same image as well
-// (ETC2 exactly). A 4096 by 4096 tile with its mipmaps is 21 MB as BC7,
-// uploaded to the GPU in one go when it is first drawn - so BC7 is switched
-// off for the terrain, halving that and the GPU memory the tiles take. The
-// aircraft keeps the shared loader above: its normal maps are UASTC, which
-// does gain from BC7 (or ASTC). See terrain.js for where it is set up.
-Tile.terrainKtx2Loader = new KTX2Loader()
-Tile.terrainKtx2Loader.setTranscoderPath("js/externals/basis/")
-Tile.terrainKtx2Loader.setCrossOrigin("anonymous")
 
 Tile.gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder)

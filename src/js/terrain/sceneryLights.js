@@ -205,6 +205,16 @@ export default class SceneryLights {
     geometry.setAttribute("position", new BufferAttribute(new Float32Array(positions), 3))
     geometry.setAttribute("color", new BufferAttribute(new Float32Array(colours), 3))
     geometry.setAttribute("strength", new BufferAttribute(new Float32Array(strengths), 1))
+    // let go of the arrays once they are on the GPU - the cloud is never
+    // culled or picked, so nothing reads them after but the bounds, which
+    // three.js works out after uploading them (to sort by), so they are
+    // worked out here first
+    geometry.computeBoundingSphere()
+    for (const attribute of Object.values(geometry.attributes)) {
+      attribute.onUpload(function () {
+        this.array = null
+      })
+    }
 
     const material = new ShaderMaterial({
       uniforms: { ...this.uniforms, ...lightStreaks.uniforms(), eye: { value: new Float32Array(3) } },

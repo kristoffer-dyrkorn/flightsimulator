@@ -44,13 +44,17 @@ import SimulationConstants from "../simulationconstants.js"
  * there is not much of it to say anything about.
  */
 
-/* The logarithmic profile, over terrain of middling roughness - mixed farmland
-   and forest. It holds through the lowest hundred metres or so, the surface
-   layer, and the wind is held at the value it reaches there above that. Below
-   about a metre the profile is meaningless: the air is being held back by
-   individual trees and buildings rather than by the terrain as a whole. */
+/* The logarithmic profile, over open, fairly smooth terrain - short grass and
+   farmland, roughness 0.03 m. The wind at 100 m comes out at 1.4 times the
+   10 m forecast: a middle course between the water so much of Norway's flying
+   is over - fjords, and the runways along them - where it is about 1.2, and
+   forest, where it is nearer 1.8. It holds through the lowest hundred metres
+   or so, the surface layer, and the wind is held at the value it reaches
+   there above that. Below about a metre the profile is meaningless: the air
+   is being held back by individual trees and buildings rather than by the
+   terrain as a whole. */
 const FORECAST_HEIGHT = 10 * SimulationConstants.METERS_TO_FEET
-const ROUGHNESS = 0.15 * SimulationConstants.METERS_TO_FEET
+const ROUGHNESS = 0.03 * SimulationConstants.METERS_TO_FEET
 const SURFACE_LAYER_TOP = 100 * SimulationConstants.METERS_TO_FEET
 const LOWEST_HEIGHT = 1 * SimulationConstants.METERS_TO_FEET
 

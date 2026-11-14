@@ -30,13 +30,14 @@ const SHOWN_UNTIL_LIGHTS = 0.5
 // Far off, the smaller buildings are left out, as they would only be a
 // pixel or two: a building is drawn while its size - the largest of its
 // width, length and height - is at least SIZE_PER_DISTANCE of its distance,
-// and always within ALL_WITHIN. A 3 m shed goes beyond 2 km, an 8 m house
-// beyond some 5 km, a 20 m block beyond 13 km. Gone, not just hidden: each
-// cell of a tile has its buildings from the largest to the smallest (see
-// sceneryWorker.js), and draws only the start of them, as far as the
-// smallest still drawn at its nearest point.
-const SIZE_PER_DISTANCE = 0.0015
-const ALL_WITHIN = 1500 // m
+// and always within ALL_WITHIN. A 3 m shed goes beyond 1 km, an 8 m house
+// beyond some 2.2 km, a 20 m block beyond 5.6 km - about as many triangles
+// over Molde as with limits of 1.5, 3 and 5 km for the three. Gone, not
+// just hidden: each cell of a tile has its buildings from the largest to
+// the smallest (see sceneryWorker.js), and draws only the start of them, as
+// far as the smallest still drawn at its nearest point.
+const SIZE_PER_DISTANCE = 1 / 280
+const ALL_WITHIN = 1000 // m
 
 // a neutral grey, as the walls and roofs are seen in full daylight
 const BUILDING_COLOR = new Color(0.17, 0.17, 0.17)
@@ -59,6 +60,11 @@ const ROOF_INSET = 2 // m
 // And the photo's own light is in it already, so a roof is only shaded by
 // the sun this much of what a wall is.
 const ROOF_SHADING = 0.3
+
+// an attribute's onUpload: its array is on the GPU, and not needed here
+function releaseArray() {
+  this.array = null
+}
 
 export default class Buildings {
   /**
@@ -160,6 +166,10 @@ export default class Buildings {
     geometry.setAttribute("normal", new BufferAttribute(normals, 4, true))
     geometry.setAttribute("roofCenter", new BufferAttribute(centers, 2))
     geometry.setIndex(new BufferAttribute(indices, 1))
+    // let go of the arrays once they are on the GPU - nothing reads them
+    // after: the bounds are given above, and update only moves the cells'
+    // draw ranges
+    for (const attribute of [...Object.values(geometry.attributes), geometry.index]) attribute.onUpload(releaseArray)
     geometry.boundingSphere = new Sphere(new Vector3(...center), radius)
     // a draw for each cell, all with the tile's one material - see
     // SIZE_PER_DISTANCE

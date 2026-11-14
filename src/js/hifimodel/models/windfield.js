@@ -9,18 +9,17 @@
  * is run on a grid fine enough to have the fjords in it - so the wind here is
  * read from it at more than one place.
  *
- * Not everywhere, though. The forecast is asked about one point at a time, so
- * it is sampled at the corners of the terrain tiles - about thirteen kilometres
- * apart - and the wind between them is interpolated. That loses the detail
- * finer than a tile, but it keeps the variation from one valley to the next,
- * and it keeps the number of questions asked of the forecast down to a handful
- * per tile flown over.
+ * It is sampled on a regular grid, WIND_GRID apart - near the forecast's own
+ * resolution of a kilometre, and a whole number of times into a terrain tile,
+ * so that the grid points also fall on the tiles' corners - and the wind
+ * between the four grid points round a position is interpolated. Every sample
+ * read is kept, so flying back over a place asks the forecast nothing again.
  *
- * The samples arrive one at a time, some while after they are first needed, and
- * some not at all. Until a corner has been heard from it stands in with the
- * regional wind: the average of the samples around the aircraft, eased towards
- * slowly so that it does not jump when one more of them comes in. A new sample
- * is then faded in over that, rather than dropped in, because a wind that
+ * The samples arrive some while after they are first needed, and some not at
+ * all. Until a grid point has been heard from it stands in with the regional
+ * wind: the average of the samples around the aircraft, eased towards slowly
+ * so that it does not jump when one more of them comes in. A new sample is
+ * then faded in over that, rather than dropped in, because a wind that
  * changes from one moment to the next is a gust - and a gust of a size set by
  * how late the network was is not one the aircraft should be made to feel.
  *
@@ -34,33 +33,30 @@
  * which is the part that says something about turbulence.
  */
 
-/* How far around the aircraft samples count towards the regional wind, m.
-   A little over a tile and a half, so it takes in the corners of the tile the
-   aircraft is over and those of the tiles around it. */
+/* How far around the aircraft samples count towards the regional wind, m */
 const REGION_RADIUS = 20000
 
 /* How long the regional wind takes to follow a change in the samples around
-   it, and how long a new sample takes to fade in, s */
+   it, and how long a new sample takes to fade in, s - a few seconds, as fast
+   flight crosses a cell of the grid in as many */
 const REGION_LAG = 30
-const FADE_IN = 20
+const FADE_IN = 5
+
+/* the distance between the grid points, m - 10 to a terrain tile */
+export const WIND_GRID = 1275
 
 export default class WindField {
   /**
-   * @param tileExtents  distance between sample points, m
-   * @param minx, miny   the corner of the tile grid, m - samples are at
-   *                     minx + i * tileExtents, miny + j * tileExtents
+   * @param originX, originY  a grid point, UTM 33, m - the corner of the tile
+   *                          grid, so that the wind grid shares its corners
    */
-  constructor(tileExtents, minx, miny) {
-    this.tileExtents = tileExtents
-    this.minx = minx
-    this.miny = miny
+  constructor(originX, originY) {
+    this.originX = originX
+    this.originY = originY
 
-    /* corner samples by "x-y", each with how far it has faded in, 0 to 1 */
+    /* every grid sample read, by "x-y" in m, each with how far it has faded
+       in, 0 to 1 - kept for good */
     this.corners = new Map()
-
-    /* samples that are not at a corner - the one for the start point - which
-       count towards the regional wind but are not interpolated between */
-    this.points = []
 
     this.regional = null
 
@@ -76,17 +72,12 @@ export default class WindField {
   /**
    * Adds a sample of the forecast.
    *
-   * @param x, y    where it was taken, m
+   * @param x, y    the grid point it was taken at, UTM 33, m
    * @param sample  the wind there: { east, north, gustSpread }, ft/s
    */
   addSample(x, y, sample) {
     const point = { x, y, east: sample.east, north: sample.north, gustSpread: sample.gustSpread, weight: 0 }
-
-    if (this.isCorner(x, y)) {
-      this.corners.set(`${x}-${y}`, point)
-    } else {
-      this.points.push(point)
-    }
+    this.corners.set(`${x}-${y}`, point)
 
     /* the first sample is all there is to go on, so it is the regional wind
        straight away rather than something to ease towards from still air */
@@ -96,13 +87,60 @@ export default class WindField {
     }
   }
 
-  /** Whether a sample for this corner has arrived. */
+  /** Whether a sample for this grid point has arrived. */
   hasCorner(x, y) {
     return this.corners.has(`${x}-${y}`)
   }
 
-  isCorner(x, y) {
-    return (x - this.minx) % this.tileExtents === 0 && (y - this.miny) % this.tileExtents === 0
+  /**
+   * The four grid points round a position, nearest first - those its wind is
+   * interpolated between.
+   *
+   * @param x, y  position, UTM 33, m
+   */
+  gridPointsAround(x, y) {
+    const x0 = this.originX + Math.floor((x - this.originX) / WIND_GRID) * WIND_GRID
+    const y0 = this.originY + Math.floor((y - this.originY) / WIND_GRID) * WIND_GRID
+    return [
+      [x0, y0],
+      [x0 + WIND_GRID, y0],
+      [x0, y0 + WIND_GRID],
+      [x0 + WIND_GRID, y0 + WIND_GRID],
+    ].sort((a, b) => Math.hypot(a[0] - x, a[1] - y) - Math.hypot(b[0] - x, b[1] - y))
+  }
+
+  /**
+   * The grid points the wind at a position needs now and next: those of the
+   * cell it is in, and of the cell across an edge of it once it is past the
+   * cell's mid axis on that side and heading for that edge, due there within
+   * lead seconds - the cell it is flying into next. Across both, as it heads
+   * for a corner, the cell beyond the corner too.
+   *
+   * @param x, y      position, UTM 33, m
+   * @param vx, vy    velocity over the ground, m/s
+   * @param lead      how long ahead to look, s
+   */
+  gridPointsNeeded(x, y, vx, vy, lead) {
+    const x0 = this.originX + Math.floor((x - this.originX) / WIND_GRID) * WIND_GRID
+    const y0 = this.originY + Math.floor((y - this.originY) / WIND_GRID) * WIND_GRID
+    // which way to the edge it is heading for, on each axis - or 0
+    const ahead = (p, p0, v) => {
+      const toward = p - p0 >= WIND_GRID / 2 ? 1 : -1
+      const distance = toward > 0 ? p0 + WIND_GRID - p : p - p0
+      return v * toward > 0 && distance < Math.abs(v) * lead ? toward : 0
+    }
+    const ax = ahead(x, x0, vx)
+    const ay = ahead(y, y0, vy)
+    // the cells needed, by their lower left corners
+    const cells = [[x0, y0]]
+    if (ax) cells.push([x0 + ax * WIND_GRID, y0])
+    if (ay) cells.push([x0, y0 + ay * WIND_GRID])
+    if (ax && ay) cells.push([x0 + ax * WIND_GRID, y0 + ay * WIND_GRID])
+    const points = new Map()
+    for (const [cx, cy] of cells) {
+      for (const [px, py] of [[cx, cy], [cx + WIND_GRID, cy], [cx, cy + WIND_GRID], [cx + WIND_GRID, cy + WIND_GRID]]) points.set(`${px}-${py}`, [px, py])
+    }
+    return [...points.values()]
   }
 
   /**
@@ -132,7 +170,6 @@ export default class WindField {
     }
 
     this.corners.forEach(add)
-    this.points.forEach(add)
 
     /* nothing nearby - flown out of range of everything heard so far - and the
        regional wind stays what it was */
@@ -146,10 +183,10 @@ export default class WindField {
   }
 
   /**
-   * The surface wind at a position, interpolated between the corners of the
-   * tile it is in. Returns the same object every time.
+   * The surface wind at a position, interpolated between the four grid points
+   * round it. Returns the same object every time.
    *
-   * @param x, y  position, m
+   * @param x, y  position, UTM 33, m
    */
   surfaceWind(x, y) {
     const wind = this.wind
@@ -157,17 +194,17 @@ export default class WindField {
 
     if (this.regional === null) return wind
 
-    const size = this.tileExtents
+    const size = WIND_GRID
 
-    const fx = (x - this.minx) / size
-    const fy = (y - this.miny) / size
+    const fx = (x - this.originX) / size
+    const fy = (y - this.originY) / size
     const i = Math.floor(fx)
     const j = Math.floor(fy)
     const sx = fx - i
     const sy = fy - j
 
-    const x0 = this.minx + i * size
-    const y0 = this.miny + j * size
+    const x0 = this.originX + i * size
+    const y0 = this.originY + j * size
 
     this.addCorner(x0, y0, (1 - sx) * (1 - sy))
     this.addCorner(x0 + size, y0, sx * (1 - sy))
@@ -177,8 +214,8 @@ export default class WindField {
     return wind
   }
 
-  /* adds one corner's share to the wind being interpolated, standing in with
-     the regional wind for as much of it as has not arrived */
+  /* adds one grid point's share to the wind being interpolated, standing in
+     with the regional wind for as much of it as has not arrived */
   addCorner(x, y, share) {
     const corner = this.corners.get(`${x}-${y}`)
     const known = corner ? corner.weight : 0

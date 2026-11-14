@@ -41,7 +41,7 @@ import { loadF16Model, EYE_POSITION as F16_EYE_POSITION } from "./graphics/f16Mo
 import { MeshoptDecoder } from "./externals/meshopt_decoder.module"
 import Gamepad from "./controller/gamepad.js"
 import EngineSound from "./audio/enginesound.js"
-import HUDObject from "./graphics/HUDObject.js"
+import HUDObject, { HUD_GLOW } from "./graphics/HUDObject.js"
 import { minutesFromSunset, sunPosition, twilight } from "./sky/sun.js"
 import { sunTransmittance, haze, luminance, setHazeScale, GROUND_ALBEDO, fogDepthGLSL } from "./sky/atmosphere.js"
 import SkyDome from "./sky/SkyDome.js"
@@ -178,6 +178,10 @@ renderer.shadowMap.type = PCFShadowMap
 // the scene and the aircraft are drawn in two passes into the same buffers
 // (see drawScene), which clears them itself before the first
 renderer.autoClear = false
+// and its statistics - see the scene stats logged below - cover the whole
+// frame, all of its passes, rather than only the last of them: drawScene
+// resets them at the start of each frame
+renderer.info.autoReset = false
 
 const hudCanvas = document.getElementById("hud")
 const hud = new HUDObject(hudCanvas)
@@ -399,8 +403,38 @@ const hudTexture = new CanvasTexture(hudCanvas)
 // made anew every frame too.
 hudTexture.generateMipmaps = false
 hudTexture.minFilter = LinearFilter
+// premultiplied, as the canvas keeps it: filtered with its alpha straight,
+// the transparent pixels round every line and letter - black - were mixed
+// into their edges, a dark fringe the glow below would not cover
+hudTexture.premultiplyAlpha = true
 hudMaterial.map = hudTexture
 hudMaterial.transparent = true
+// the glow round the symbology - see HUD_GLOW: the canvas's alpha, blurred
+// by a 5 x 5 Gaussian, in the glow's colour, under the symbols themselves
+hudMaterial.onBeforeCompile = (shader) => {
+  const weights = [-2, -1, 0, 1, 2].map((d) => Math.exp((-d * d) / (2 * HUD_GLOW.sigma ** 2)))
+  const total = weights.reduce((sum, w) => sum + w, 0) ** 2
+  let taps = ""
+  for (let j = -2; j <= 2; j++) {
+    for (let i = -2; i <= 2; i++) {
+      const w = (weights[i + 2] * weights[j + 2]) / total
+      taps += `glow += ${w.toFixed(6)} * texture2D(map, vMapUv + texel * vec2(${i}.0, ${j}.0)).a;\n`
+    }
+  }
+  shader.fragmentShader = shader.fragmentShader.replace(
+    "#include <map_fragment>",
+    /* glsl */ `#include <map_fragment>
+    vec2 texel = 1.0 / vec2(textureSize(map, 0));
+    float glow = 0.0;
+    ${taps}
+    // the symbols - premultiplied, see hudTexture - over the glow, and back
+    // to straight alpha for blending
+    float glowAlpha = ${HUD_GLOW.strength.toFixed(3)} * glow * (1.0 - diffuseColor.a);
+    float alpha = diffuseColor.a + glowAlpha;
+    diffuseColor.rgb = alpha > 0.0 ? (diffuseColor.rgb + diffuse * vec3(${HUD_GLOW.color.map((c) => c.toFixed(4)).join(", ")}) * glowAlpha) / alpha : vec3(0.0);
+    diffuseColor.a = alpha;`,
+  )
+}
 
 // The HUD is drawn last, in a scene of its own, so the airframe seen from
 // the cockpit never covers it. The HUD plane is fixed in that scene, straight
@@ -481,7 +515,7 @@ terrain.buildings.setSunDirection(sunDirection)
 
 // set up physics simulation, flying in a surface wind read from the forecast at
 // the corners of the terrain tiles
-const windField = new WindField(TILE_EXTENTS, MINX, MINY)
+const windField = new WindField(MINX, MINY)
 const f16simulation = new F16Simulation(windField)
 // the fuel aboard to start with, percent of a full internal load - see
 // fuelmodel.js; 80 unless given
@@ -658,13 +692,14 @@ function logSun() {
 logSun()
 setInterval(updateSun, 1000)
 
-// Fly in the real weather: ask MET what the wind is doing over the start point,
-// and then, a corner at a time and a few seconds apart, at the corners of the
-// terrain tiles around the aircraft - see nowcast.js. The forecast only has the
-// wind near the ground, so that is the surface wind, and the wind model works
-// out the wind higher up from it. Deliberately not awaited: the simulation
-// starts on the default weather and picks the real one up a moment later, and
-// carries on with the default if the service cannot be reached.
+// Fly in the real weather: ask MET what the wind is doing on a grid round the
+// start point, 1275 m apart and lined up with the terrain tiles, and then
+// round the aircraft as it flies, a little ahead of it - see nowcast.js. The
+// forecast only has the wind near the ground, so that is the surface wind, and
+// the wind model works out the wind higher up from it. Deliberately not
+// awaited: the simulation starts on the default weather and picks the real one
+// up a moment later, and carries on with the default if the service cannot be
+// reached.
 const nowcastWind = new NowcastWind(
   windField,
   (x, y) => proj4(UTM33N_PROJECTION).inverse([x, y]),
@@ -676,18 +711,11 @@ const nowcastWind = new NowcastWind(
 
 nowcastWind.start(startPoint[0], startPoint[1]).then((wind) => {
   if (!wind) return
-
-  console.log(
-    "Surface wind: %d knots from %d degrees, gusting %d",
-    Math.round(wind.speed * KNOTS_PER_FOOT_PER_SECOND),
-    Math.round(wind.direction),
-    Math.round(wind.gust * KNOTS_PER_FOOT_PER_SECOND),
-  )
 })
 
 // The surface wind changes as the aircraft moves, and as more of it is read, so
 // the turbulence down low is kept following the wind under the aircraft. Five
-// times a second is plenty: across a tile the wind changes over kilometres.
+// times a second is plenty: the wind is read 1275 m apart.
 setInterval(() => {
   if (paused || !windField.ready) return
 
@@ -966,7 +994,10 @@ function strikeValues(part) {
   else values.pitch = pitch
   if (part.includes("speedbrake")) values.speedbrake = Math.round(controlActuators.speedbrake)
   if (part.includes("stabilator")) {
-    values.stabilator = (controlActuators.elevator + (part.includes("left") ? -1 : 1) * controlActuators.stabilatorDiff).toFixed(1)
+    values.stabilator = (
+      controlActuators.elevator +
+      (part.includes("left") ? -1 : 1) * controlActuators.stabilatorDiff
+    ).toFixed(1)
   }
   return values
 }
@@ -1007,7 +1038,8 @@ setInterval(() => {
   // Down and rolling, but a wheel has left the runway - off its end or
   // side, into the grass or the sea. The runway polygons are the only
   // ground that's mapped as safe to roll on, so this is a crash too.
-  const off = onGround && wheelsTouching ? legsOffRunway(f16simulation.landingGearModel.legsTouching(airplaneState)) : []
+  const off =
+    onGround && wheelsTouching ? legsOffRunway(f16simulation.landingGearModel.legsTouching(airplaneState)) : []
   if (off.length > 0) {
     crash({ runoff: off.join(",") })
     return
@@ -1109,7 +1141,8 @@ function drawScene(currentFrametime) {
   f16Rig?.setControls(view.actuators)
   // forward over the ground, for the tyres to roll - not while paused,
   // when a redraw comes after however long the pause took
-  const groundSpeed = renderState.vt * Math.cos(renderState.alpha) * Math.cos(renderState.beta) * SimulationConstants.FEET_TO_METERS
+  const groundSpeed =
+    renderState.vt * Math.cos(renderState.alpha) * Math.cos(renderState.beta) * SimulationConstants.FEET_TO_METERS
   const tyreTime = paused && !replay.playing ? 0 : frameTime * 0.001
   f16Rig?.update(view.actuators.gear, view.actuators.noseSteer, view.strutTravel, groundSpeed, tyreTime)
 
@@ -1193,7 +1226,8 @@ function liveView() {
   // ActuatorModel's own comment) - passing it straight through here is
   // what gives the visual gear a real transition instead of a snap toggle
   const strutTravel = f16simulation.landingGearModel.strutTravel(renderState)
-  for (const leg in view.strutTravel) view.strutTravel[leg] = (strutTravel[leg] ?? 0) * SimulationConstants.FEET_TO_METERS
+  for (const leg in view.strutTravel)
+    view.strutTravel[leg] = (strutTravel[leg] ?? 0) * SimulationConstants.FEET_TO_METERS
   view.throttle = airplaneControlInput.throttle
   view.gearDown = gearDown
   view.landingMode = flightControlSystem.landingMode
@@ -1231,7 +1265,8 @@ function drawView(view, frameTime) {
   updateGroundShadow(view.heightAboveGround)
   // see GROUND_SHADOW_SOFTNESS
   const softnessTarget = view.weightOnWheels ? GROUND_SHADOW_SOFTNESS : 0
-  groundShadowSoftness += (softnessTarget - groundShadowSoftness) * (1 - Math.exp(-(frameTime * 0.001) / GROUND_SHADOW_SOFTEN_TIME))
+  groundShadowSoftness +=
+    (softnessTarget - groundShadowSoftness) * (1 - Math.exp(-(frameTime * 0.001) / GROUND_SHADOW_SOFTEN_TIME))
   groundShadow.setSoftness(groundShadowSoftness < 0.01 ? 0 : groundShadowSoftness / (2 * SHADOW_EXTENT))
 
   chaseObject.update(f16, frameTime)
@@ -1262,14 +1297,30 @@ function drawView(view, frameTime) {
   terrain.sceneryLights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio())
   // the glide slope indicator, in landing mode
   f16Rig?.setGlideSlope(
-    view.landingMode ? terrain.runways.glideSlope(cameras[0].position, glideForward.set(0, 1, 0).applyQuaternion(f16.quaternion)) : null,
+    view.landingMode
+      ? terrain.runways.glideSlope(cameras[0].position, glideForward.set(0, 1, 0).applyQuaternion(f16.quaternion))
+      : null,
   )
-  f16Lights.update(terrain.sceneryLights.level, currentCamera !== 0, view.actuators.gear, performance.now() / 1000, renderer.getPixelRatio())
+  f16Lights.update(
+    terrain.sceneryLights.level,
+    currentCamera !== 0,
+    view.actuators.gear,
+    performance.now() / 1000,
+    renderer.getPixelRatio(),
+  )
   updateLandingLight(f16, cameras[currentCamera], terrain.sceneryLights.level, view.actuators.gear)
-  terrain.runways.lights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio(), cameras[0].position, performance.now() / 1000)
+  terrain.runways.lights.update(
+    cameras[currentCamera],
+    sky.adaptation,
+    scene.fog.density,
+    renderer.getPixelRatio(),
+    cameras[0].position,
+    performance.now() / 1000,
+  )
   engineSound.update(cameras[currentCamera], f16, renderState.pow)
   f16Rig?.setEngine(renderState.pow, sky.adaptation)
 
+  renderer.info.reset()
   renderer.clear()
   renderer.render(scene, cameras[currentCamera])
 
@@ -1442,7 +1493,6 @@ function placeHudAboveAirframe(object) {
 
   if (highest === -Infinity) return
   placeHud(highest * MathUtils.RAD2DEG + HUD_CLEARANCE)
-  console.log("HUD glass bottom edge at %s degrees", (highest * MathUtils.RAD2DEG + HUD_CLEARANCE).toFixed(1))
 }
 
 // the canopy glass is see-through, so it receives shadows but doesn't cast
