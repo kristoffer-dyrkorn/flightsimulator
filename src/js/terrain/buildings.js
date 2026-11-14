@@ -27,6 +27,17 @@ const TILE_EXTENTS = 50 * 255
 // shown the walls would hide them.
 const SHOWN_UNTIL_LIGHTS = 0.5
 
+// Far off, the smaller buildings are left out, as they would only be a
+// pixel or two: a building is drawn while its size - the largest of its
+// width, length and height - is at least SIZE_PER_DISTANCE of its distance,
+// and always within ALL_WITHIN. A 3 m shed goes beyond 2 km, an 8 m house
+// beyond some 5 km, a 20 m block beyond 13 km. Gone, not just hidden: each
+// cell of a tile has its buildings from the largest to the smallest (see
+// sceneryWorker.js), and draws only the start of them, as far as the
+// smallest still drawn at its nearest point.
+const SIZE_PER_DISTANCE = 0.0015
+const ALL_WITHIN = 1500 // m
+
 // a neutral grey, as the walls and roofs are seen in full daylight
 const BUILDING_COLOR = new Color(0.17, 0.17, 0.17)
 // Lit like the terrain round them - by Tile.light, the daylight's colour and
@@ -131,7 +142,7 @@ export default class Buildings {
     if (!mesh) return
     this.scene.remove(mesh)
     mesh.geometry.dispose()
-    mesh.material.dispose()
+    mesh.userData.material.dispose()
     this.meshes.delete(tileName)
   }
 
@@ -140,7 +151,7 @@ export default class Buildings {
    *
    * @param tileName  "{lowerLeftEasting}-{lowerLeftNorthing}"
    */
-  add(tileName, { positions, normals, centers, indices, center, radius }) {
+  add(tileName, { positions, normals, centers, indices, cells, cellSize, center, radius }) {
     if (this.meshes.has(tileName)) return
     const [, x, y] = tileName.match(/^(-?\d+)-(-?\d+)$/).map(Number)
 
@@ -150,8 +161,15 @@ export default class Buildings {
     geometry.setAttribute("roofCenter", new BufferAttribute(centers, 2))
     geometry.setIndex(new BufferAttribute(indices, 1))
     geometry.boundingSphere = new Sphere(new Vector3(...center), radius)
+    // a draw for each cell, all with the tile's one material - see
+    // SIZE_PER_DISTANCE
+    for (const cell of cells) geometry.addGroup(cell.start, cell.ends[cell.ends.length - 1] - cell.start, 0)
 
-    const mesh = new Mesh(geometry, this.material())
+    const material = this.material()
+    const mesh = new Mesh(geometry, [material])
+    mesh.userData.material = material
+    mesh.userData.cells = cells
+    mesh.userData.cellSize = cellSize
     mesh.name = `buildings ${tileName}`
     mesh.position.set(x, y, 0)
     mesh.updateMatrix()
@@ -173,7 +191,7 @@ export default class Buildings {
     const daylight = lightsLevel < SHOWN_UNTIL_LIGHTS
     for (const [tileName, mesh] of this.meshes) {
       // the roofs' photo - the tile's, once it is in
-      const roofs = mesh.material.userData.roofs
+      const roofs = mesh.userData.material.userData.roofs
       roofs.terrainMap.value = this.terrainMap(tileName)
       roofs.hasTerrainMap.value = roofs.terrainMap.value !== null
 
@@ -181,6 +199,25 @@ export default class Buildings {
       const dx = Math.max(x - camera.position.x, 0, camera.position.x - (x + TILE_EXTENTS))
       const dy = Math.max(y - camera.position.y, 0, camera.position.y - (y + TILE_EXTENTS))
       mesh.visible = daylight && Math.hypot(dx, dy) < VISIBLE_DISTANCE
+      if (!mesh.visible) continue
+
+      // see SIZE_PER_DISTANCE - from each cell's nearest point
+      const { cells, cellSize } = mesh.userData
+      cells.forEach((cell, k) => {
+        const cx = Math.max(x + cell.x - camera.position.x, 0, camera.position.x - (x + cell.x + cellSize))
+        const cy = Math.max(y + cell.y - camera.position.y, 0, camera.position.y - (y + cell.y + cellSize))
+        const distance = Math.hypot(cx, cy)
+        const smallest = distance < ALL_WITHIN ? 0 : distance * SIZE_PER_DISTANCE
+        // the buildings drawn: those at least that size, at the start
+        let low = 0
+        let high = cell.sizes.length
+        while (low < high) {
+          const middle = (low + high) >> 1
+          if (cell.sizes[middle] >= smallest) low = middle + 1
+          else high = middle
+        }
+        mesh.geometry.groups[k].count = low === 0 ? 0 : cell.ends[low - 1] - cell.start
+      })
     }
   }
 }
