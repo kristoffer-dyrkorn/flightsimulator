@@ -131,8 +131,6 @@ let wheelsTouching = false
 // physics loop (see HARD_POINTS in landinggearmodel.js), acted on once it
 // has run
 let crashReason = null
-// the aircraft's nose direction, for the glide slope indicator
-const glideForward = new Vector3()
 
 // hard pause - freezes physics, camera motion, terrain streaming, and
 // rendering entirely (drawScene below returns immediately once this is
@@ -379,6 +377,7 @@ const EXTERNAL_CAMERA_MIN_DISTANCE = 10
 // camera that clips much closer - see drawScene.
 const COCKPIT_NEAR = 0.05
 const COCKPIT_FAR = 100
+
 
 // set up container object for the 3D aircraft model. Visible from the start,
 // since the simulator starts in the cockpit and the airframe shows from there.
@@ -1295,12 +1294,9 @@ function drawView(view, frameTime) {
   // no streaks from the cockpit
   lightStreaks.update(cameras[currentCamera], drawingBufferSize.x, drawingBufferSize.y, currentCamera !== 0)
   terrain.sceneryLights.update(cameras[currentCamera], sky.adaptation, scene.fog.density, renderer.getPixelRatio())
-  // the glide slope indicator, in landing mode
-  f16Rig?.setGlideSlope(
-    view.landingMode
-      ? terrain.runways.glideSlope(cameras[0].position, glideForward.set(0, 1, 0).applyQuaternion(f16.quaternion))
-      : null,
-  )
+  // the AOA indexer, as the vane reads it - lit with the gear handle down
+  // and the weight off the wheels, as the real one is
+  f16Rig?.setAngleOfAttack(gearDown && !view.weightOnWheels ? MathUtils.RAD2DEG * renderState.airAlpha : null)
   f16Lights.update(
     terrain.sceneryLights.level,
     currentCamera !== 0,

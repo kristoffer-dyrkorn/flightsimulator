@@ -107,14 +107,7 @@ const RUNWAY_TILES = new Set([
  * needs to track load/unload.
  */
 
-// see glideSlope
 const DEG = Math.PI / 180
-const GLIDE_ANGLE = 3 // degrees
-const GLIDE_AIM = 300 // m past the threshold
-const GLIDE_HEADING = 45 // degrees
-const GLIDE_SECTOR = 15 // degrees
-const GLIDE_RANGE = 20000 // m
-const PAPI_ON_SLOPE_LOW = 10 / 60 // degrees
 
 export default class RunwayRegistry {
   /**
@@ -133,10 +126,6 @@ export default class RunwayRegistry {
     this.thresholds = new Map()
     // the ones of those found from their own threshold lights, not wing bars
     this.thresholdLights = new Set()
-    // runwayKey -> how it is approached: its landing bearing (grid, degrees),
-    // and its slope indicator's angle (degrees) and MEHT (m), where it has
-    // one - see glideSlope
-    this.approaches = new Map()
     // tileName -> its file's fetch, once started
     this.fetches = new Map()
 
@@ -208,8 +197,6 @@ export default class RunwayRegistry {
               if (!fromWingBars) this.thresholdLights.add(key)
             }
 
-            this.readApproaches(geojson.features)
-
             const polygons = geojson.features.flatMap((feature) => extractPolygons(feature.geometry))
             if (polygons.length > 0) {
               this.cache.set(tileName, polygons)
@@ -220,74 +207,6 @@ export default class RunwayRegistry {
       )
     }
     return this.fetches.get(tileName)
-  }
-
-  // see approaches
-  readApproaches(features) {
-    const approach = (key) => {
-      if (!this.approaches.has(key)) this.approaches.set(key, {})
-      return this.approaches.get(key)
-    }
-    for (const feature of features) {
-      const p = feature.properties
-      const airport = feature.id?.split("/")[0]
-      if (p.aeroway === "light" && (p.system === "threshold" || p.system === "threshold_wingbar")) {
-        approach(`${airport}/${p.runway}/${p.direction}`).bearing = p.landingBearingGrid
-      } else if (p.aeroway === "runway") {
-        for (const [direction, lighting] of Object.entries(p.lighting ?? {})) {
-          const vasis = lighting?.vasis
-          if (!vasis?.angleDeg || !vasis.mehtFt) continue
-          const a = approach(`${airport}/${p.ref}/${direction}`)
-          a.angle = vasis.angleDeg
-          a.meht = vasis.mehtFt * 0.3048
-        }
-      }
-    }
-  }
-
-  /**
-   * How far the eye is above (+) or below (-) the approach slope of the
-   * runway it is lined up with, in degrees - or null if it is lined up with
-   * none. Lined up: heading within GLIDE_HEADING of the runway's landing
-   * bearing, within GLIDE_SECTOR either side of its centreline and
-   * GLIDE_RANGE of where the slope starts, and not past that yet. Of those,
-   * the nearest.
-   *
-   * The slope starts where the runway's slope indicator stands - see
-   * SLOPE_INDICATORS in runwayLights.js: MEHT over the tangent of its lower
-   * on-slope edge, along the runway from the threshold - and rises at the
-   * indicator's angle, so the two agree. A runway without one gets
-   * GLIDE_ANGLE from GLIDE_AIM.
-   *
-   * @param eye      the pilot's eye, in the scene's coordinates
-   * @param forward  the aircraft's nose direction, in the scene's coordinates
-   */
-  glideSlope(eye, forward) {
-    const heading = Math.hypot(forward.x, forward.y)
-    if (heading < 1e-6) return null
-    let nearest = Infinity
-    let deviation = null
-    for (const [key, threshold] of this.thresholds) {
-      const approach = this.approaches.get(key)
-      if (approach?.bearing === undefined) continue
-      const bearing = approach.bearing * DEG
-      const ux = Math.sin(bearing)
-      const uy = Math.cos(bearing)
-      if ((forward.x * ux + forward.y * uy) / heading < Math.cos(GLIDE_HEADING * DEG)) continue
-
-      const angle = approach.angle ?? GLIDE_ANGLE
-      const aim = approach.meht ? approach.meht / Math.tan((angle - PAPI_ON_SLOPE_LOW) * DEG) : GLIDE_AIM
-      const dx = eye.x - threshold[0]
-      const dy = eye.y - threshold[1]
-      const distance = aim - (dx * ux + dy * uy)
-      const across = dx * uy - dy * ux
-      if (distance <= 0 || distance > GLIDE_RANGE || Math.abs(across) > distance * Math.tan(GLIDE_SECTOR * DEG)) continue
-      if (distance < nearest) {
-        nearest = distance
-        deviation = Math.atan2(eye.z - threshold[2], distance) / DEG - angle
-      }
-    }
-    return deviation
   }
 
   /**

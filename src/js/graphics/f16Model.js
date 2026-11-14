@@ -272,8 +272,8 @@ const TUB_PANEL_FROM = 0.2
 // own HUD there - and so are the remains of it all: the parts of the mesh,
 // each in one piece, that lie wholly inside one of REMAINS. The AOA indexer
 // on the HUD's left and the refuelling status lights on its right - the
-// parts wholly inside one of KEPT - are kept, the indexer as the glide slope
-// indicator (see GLIDE_LAMPS), and each moved out to its side by its SHIFT,
+// parts wholly inside one of KEPT - are kept, the indexer lit as the real
+// one is (see INDEXER_LAMPS), and each moved out to its side by its SHIFT,
 // clear of the text the simulator's HUD shows at its lower corners, and
 // turned about the upright through its middle to face the pilot's eye, so
 // little of its side shows.
@@ -303,28 +303,31 @@ const COCKPIT_MODEL = {
   ],
 }
 
-// The glide slope indicator, on the AOA indexer's face (model frame: x is
-// how far ahead, and the face looks back at the pilot) - its three lamps,
-// top to bottom, as the AOA indexer's: a chevron pointing down, lit above
-// the slope (fly down), a ring, lit on it, and a chevron pointing up, lit
-// below it (fly up). Within GLIDE_ON either side only the ring is lit, out
-// to GLIDE_FULL the ring and the chevron on that side, and beyond that the
-// chevron alone. All dark while the indicator is off - see setGlideSlope.
+// The AOA indexer's lamps, on its face (model frame: x is how far ahead, and
+// the face looks back at the pilot) - top to bottom, as the real F-16's: a
+// red chevron pointing down, slow - the angle of attack too high, lower the
+// nose; a green ring, on speed; and an amber chevron pointing up, fast - too
+// low, raise the nose. The ring alone within INDEXER_ON_SPEED_BAND of
+// INDEXER_ON_SPEED, it and the chevron on that side out to
+// INDEXER_RING_BAND - the 11 to 15 degrees of the HUD's approach bracket -
+// and beyond that the chevron alone. Lit with the gear handle down and the
+// weight off the wheels, and all dark otherwise - see setAngleOfAttack.
 // The face is a window, recessed behind the housing's rim: y 1.164 to
 // 1.183, z 0.7988 to 0.8055, at x 1.096 - before the housing is moved (see
 // COCKPIT_MODEL), which the lamps are moved with.
-const GLIDE_FACE = 1.0955 // x, just in front of the indexer's face
-const GLIDE_CENTRE_Z = 0.8021
-const GLIDE_LAMP_SIZE = 0.0027 // half the width of a symbol
-const GLIDE_LAMPS = [
-  { shape: "down", y: 1.1797, colour: new Color(1.0, 0.55, 0.05) },
+const INDEXER_FACE = 1.0955 // x, just in front of the indexer's face
+const INDEXER_CENTRE_Z = 0.8021
+const INDEXER_LAMP_SIZE = 0.0027 // half the width of a symbol
+const INDEXER_LAMPS = [
+  { shape: "down", y: 1.1797, colour: new Color(1.0, 0.08, 0.04) },
   { shape: "ring", y: 1.1735, colour: new Color(0.15, 1.0, 0.25) },
-  { shape: "up", y: 1.1673, colour: new Color(1.0, 0.08, 0.04) },
+  { shape: "up", y: 1.1673, colour: new Color(1.0, 0.55, 0.05) },
 ]
-const GLIDE_ON = 0.2 // degrees
-const GLIDE_FULL = 0.7 // degrees
+const INDEXER_ON_SPEED = 13 // degrees
+const INDEXER_ON_SPEED_BAND = 1 // degrees
+const INDEXER_RING_BAND = 2 // degrees
 // how bright an unlit lamp's glass still looks
-const GLIDE_UNLIT = 0.03
+const INDEXER_UNLIT = 0.03
 // the nose seen from the eye, half its width
 const NOSE_HALF_WIDTH = 9 // degrees
 // how far above the line over the nose the panel's top is, so none of the
@@ -602,9 +605,9 @@ function cutPieces(mesh, box, spares = []) {
   mesh.geometry.setIndex(kept)
 }
 
-// a glide slope lamp's symbol, facing back - see GLIDE_LAMPS
-function glideLampGeometry(kind) {
-  const s = GLIDE_LAMP_SIZE
+// an AOA indexer lamp's symbol, facing back - see INDEXER_LAMPS
+function indexerLampGeometry(kind) {
+  const s = INDEXER_LAMP_SIZE
   const shape = new Shape()
   if (kind === "ring") {
     shape.absarc(0, 0, 0.8 * s, 0, 2 * Math.PI, false)
@@ -626,7 +629,7 @@ function glideLampGeometry(kind) {
   }
   // the shape's x to the right (model z), its y up (model y), on the face
   const geometry = new ShapeGeometry(shape)
-  geometry.applyMatrix4(new Matrix4().set(0, 0, 0, GLIDE_FACE, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1))
+  geometry.applyMatrix4(new Matrix4().set(0, 0, 0, INDEXER_FACE, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1))
   return geometry
 }
 
@@ -918,6 +921,96 @@ function roundGlow(material, frame) {
   return round
 }
 
+// All the model's skinned parts hang on the same 45 bones, but each came with
+// a skeleton of its own - its own copy of the bones' inverse bind matrices -
+// and three.js works out each skeleton's bone matrices, and uploads them to
+// the GPU as a texture, every frame: 41 times over. The copies differ, but
+// only by one matrix per part, the same for every bone (where the part sat
+// when it was bound), so that matrix can be moved into the part's geometry
+// instead, and all of them bound to one skeleton - posed exactly as before.
+// A part whose skeleton doesn't fit that keeps its own.
+const BIND_TOLERANCE = 1e-4
+
+// an attribute's values as floats - see shareSkeleton
+function toFloat(attribute) {
+  const array = new Float32Array(attribute.count * attribute.itemSize)
+  for (let i = 0; i < attribute.count; i++) {
+    for (let c = 0; c < attribute.itemSize; c++) array[i * attribute.itemSize + c] = attribute.getComponent(i, c)
+  }
+  return new BufferAttribute(array, attribute.itemSize)
+}
+function shareSkeleton(model) {
+  const meshes = []
+  model.traverse((o) => o.isSkinnedMesh && meshes.push(o))
+  if (meshes.length < 2) return
+  const shared = meshes[0].skeleton
+  const sharedInverse = shared.boneInverses.map((m) => m.clone().invert())
+  const d = new Matrix4()
+  const dj = new Matrix4()
+  const normalMatrix = new Matrix3()
+  const linear = new Matrix3()
+  const v = new Vector3()
+
+  for (const mesh of meshes.slice(1)) {
+    const skeleton = mesh.skeleton
+    if (skeleton === shared) continue
+    const sameBones = skeleton.bones.length === shared.bones.length && skeleton.bones.every((bone, j) => bone === shared.bones[j])
+    // the part's matrix: the same for every bone, or it keeps its own skeleton
+    d.copy(sharedInverse[0]).multiply(skeleton.boneInverses[0])
+    const oneMatrix =
+      sameBones &&
+      skeleton.boneInverses.every((m, j) => {
+        dj.copy(sharedInverse[j]).multiply(m)
+        return dj.elements.every((e, k) => Math.abs(e - d.elements[k]) <= BIND_TOLERANCE)
+      })
+    if (!oneMatrix) {
+      console.log(`F-16 model: ${mesh.name} keeps a skeleton of its own`)
+      continue
+    }
+
+    // the geometry, so that the shared skeleton poses it as its own did - a
+    // copy, as other parts may share it, the first one's included
+    const geometry = mesh.geometry.clone()
+    mesh.geometry = geometry
+    // The positions are quantized - 16-bit integers from -1 to 1, scaled up
+    // by the part's world matrix - and moved, some would leave that range
+    // and wrap round, so they are made floats first
+    geometry.setAttribute("position", toFloat(geometry.attributes.position))
+    for (const name of Object.keys(geometry.morphAttributes)) geometry.morphAttributes[name] = geometry.morphAttributes[name].map(toFloat)
+    // (the bind matrix's own inverse: bindMatrixInverse is the inverse of the
+    // mesh's world matrix, in three.js's default attached bind mode)
+    const transform = mesh.bindMatrix.clone().invert().multiply(d).multiply(mesh.bindMatrix)
+    geometry.applyMatrix4(transform)
+    // the tyres' morph targets are offsets, so only turned and scaled - and
+    // the normals' offsets only turned
+    linear.setFromMatrix4(transform)
+    normalMatrix.getNormalMatrix(transform)
+    const normalScale = Math.cbrt(Math.abs(normalMatrix.determinant()))
+    for (const [name, targets] of Object.entries(geometry.morphAttributes)) {
+      for (const target of targets) {
+        for (let i = 0; i < target.count; i++) {
+          v.fromBufferAttribute(target, i)
+          if (name === "position" && geometry.morphTargetsRelative) v.applyMatrix3(linear)
+          else if (name === "position") v.applyMatrix4(transform)
+          else {
+            v.applyMatrix3(normalMatrix)
+            if (geometry.morphTargetsRelative) v.divideScalar(normalScale)
+            else v.normalize()
+          }
+          target.setXYZ(i, v.x, v.y, v.z)
+        }
+      }
+    }
+
+    mesh.bind(shared, mesh.bindMatrix)
+    skeleton.dispose()
+    // the bounds three.js keeps for a skinned mesh, if already worked out,
+    // are of the geometry as it was - worked out anew when next needed
+    mesh.boundingSphere = null
+    mesh.boundingBox = null
+  }
+}
+
 class F16Rig {
   constructor(f16, gltf) {
     const model = gltf.scene
@@ -1057,9 +1150,9 @@ class F16Rig {
     })
 
     this.cockpitOnlyParts = []
-    // see setGlideSlope - the lamps come with the cockpit model
-    this.glideLamps = null
-    this.glideSlope = null
+    // see setAngleOfAttack - the lamps come with the cockpit model
+    this.indexerLamps = null
+    this.angleOfAttack = null
     this.loadCockpitModel(f16)
 
     // the parts reaching within COCKPIT_NEAR_REACH of the eye, and the rest
@@ -1078,6 +1171,9 @@ class F16Rig {
     this.toLocal = new Matrix4()
     this.from = new Vector3()
     this.to = new Vector3()
+
+    // one skeleton for all the skinned parts - see shareSkeleton
+    shareSkeleton(model)
   }
 
   // For the cockpit view's second, close-up pass over the airframe (see
@@ -1284,24 +1380,24 @@ class F16Rig {
           own.dispose()
         }
 
-        // see GLIDE_LAMPS
-        this.glideLamps = GLIDE_LAMPS.map(({ shape, y, colour }) => {
-          const lamp = new Mesh(glideLampGeometry(shape), new MeshBasicMaterial({ color: colour.clone(), toneMapped: false, side: DoubleSide }))
-          lamp.name = "GlideSlopeLamp"
-          lamp.position.set(0, y, GLIDE_CENTRE_Z)
+        // see INDEXER_LAMPS
+        this.indexerLamps = INDEXER_LAMPS.map(({ shape, y, colour }) => {
+          const lamp = new Mesh(indexerLampGeometry(shape), new MeshBasicMaterial({ color: colour.clone(), toneMapped: false, side: DoubleSide }))
+          lamp.name = "AoaIndexerLamp"
+          lamp.position.set(0, y, INDEXER_CENTRE_Z)
           lamp.applyMatrix4(placings[0])
           lamp.castShadow = lamp.receiveShadow = false
           lamp.userData.colour = colour
           model.add(lamp)
           return lamp
         })
-        this.setGlideSlope(this.glideSlope)
+        this.setAngleOfAttack(this.angleOfAttack)
 
         panel.add(model)
         panel.visible = false
         f16.add(panel)
         this.cockpitOnlyParts.push(panel)
-        this.nearParts.push(...meshes, ...this.glideLamps)
+        this.nearParts.push(...meshes, ...this.indexerLamps)
       },
       () => {},
       (error) => console.log("Could not load the cockpit model: " + error),
@@ -1438,22 +1534,21 @@ class F16Rig {
    *                    fixed brightness, which shows brighter the darker it is
    */
   /**
-   * The glide slope indicator - see GLIDE_LAMPS.
+   * The AOA indexer - see INDEXER_LAMPS.
    *
-   * @param deviation  degrees above (+) or below (-) the approach slope, or
-   *                   null to turn it off
+   * @param degrees  the angle of attack, or null to turn the indexer off
    */
-  setGlideSlope(deviation) {
-    this.glideSlope = deviation
-    if (!this.glideLamps) return
-    const [down, ring, up] = this.glideLamps
-    const d = deviation ?? 0
+  setAngleOfAttack(degrees) {
+    this.angleOfAttack = degrees
+    if (!this.indexerLamps) return
+    const error = (degrees ?? INDEXER_ON_SPEED) - INDEXER_ON_SPEED
+    const on = degrees !== null
     const lit = [
-      deviation !== null && d > GLIDE_ON,
-      deviation !== null && Math.abs(d) <= GLIDE_FULL,
-      deviation !== null && d < -GLIDE_ON,
+      on && error > INDEXER_ON_SPEED_BAND,
+      on && Math.abs(error) <= INDEXER_RING_BAND,
+      on && error < -INDEXER_ON_SPEED_BAND,
     ]
-    ;[down, ring, up].forEach((lamp, i) => lamp.material.color.copy(lamp.userData.colour).multiplyScalar(lit[i] ? 1 : GLIDE_UNLIT))
+    this.indexerLamps.forEach((lamp, i) => lamp.material.color.copy(lamp.userData.colour).multiplyScalar(lit[i] ? 1 : INDEXER_UNLIT))
   }
 
   setEngine(power, adaptation = 1) {

@@ -68,7 +68,7 @@ Features after July 2025 have been made using AI.
 #### November 2026:
 
 - Added replay mode
-- Added glide scope indicator when in landing mode and lined up with a runway
+- Added the AOA indexer left of the HUD, lit as in the real F-16 when the landing gear is down
 - Added modelling of fuel consumption and fuel weight
 - Added more realistic runway rendering, including markings and numbers
 - Added 3D buildings in daylight and building and street lights in the dark, using data from from Overture
