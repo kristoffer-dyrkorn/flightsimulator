@@ -18,6 +18,16 @@ An F-16 flight simulator with realistic graphics, flight dynamics and audio. Run
 - Highly efficient terrain rendering based on tiling and dynamic loading of data
 - Works on mobiles (but no steering implemented so far)
 
+## Screenshots
+
+![Oslo at night](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image2.jpeg)
+
+![Moldefjord](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image3.jpeg)
+
+![Landing in Molde](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
+
+![Over Gardermoen](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image5.jpeg)
+
 ## Controls
 
 Use the arrow keys to to steer the aircraft up, down, left or right. If you connect an NXT Gladiator joystick it should also work.
@@ -52,16 +62,6 @@ When the landing gear is extended the flaps will be automatically deployed and t
 Be aware that at touch down the sink rate should be less than 600 ft/min, else the landing is too hard. While in landing mode, an indicator on the right side (next to the altitude meter) shows the climb rate/sink rate - measured in 1000 ft/min. At touchdown the pointer should be close to - or above - the first tick below zero.
 
 You will need to flare before touchdown. At touchdown, set the throttle to idle, let the plane roll on its back wheels for a short while to reduce its speed, and then apply wheel brakes.
-
-## Screenshots
-
-![Oslo at night](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image2.jpeg)
-
-![Moldefjord](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image3.jpeg)
-
-![Landing in Molde](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
-
-![Over Gardermoen](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image5.jpeg)
 
 ## Release notes
 
