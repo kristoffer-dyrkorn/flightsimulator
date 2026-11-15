@@ -55,11 +55,13 @@ You will need to flare before touchdown. At touchdown, set the throttle to idle,
 
 ## Screenshots
 
-![Åndalsnes](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image2.jpeg)
+![Oslo at night](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image2.jpeg)
 
-![Wingman camera](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image3.jpeg)
+![Moldefjord](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image3.jpeg)
 
-![Landing](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
+![Landing in Molde](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image4.jpeg)
+
+![Over Gardermoen](https://github.com/kristoffer-dyrkorn/flightsimulator/blob/master/screenshots/image5.jpeg)
 
 ## Release notes
 
